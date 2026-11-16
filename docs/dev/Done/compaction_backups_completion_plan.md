@@ -16,7 +16,7 @@
 - Visual inspection used Linux/offscreen Qt. Native Windows, real ND2/GPU processing and large-dataset copying were not exercised.
 
 The technical package guide moved from the workflow package into
-[workflow_architecture.md](workflow_architecture.md). The root README is the
+[workflow_architecture.md](../Guides/workflow_architecture.md). The root README is the
 user-facing entry point and uses backups/compaction terminology throughout.
 
 ## Rebuild policy follow-up

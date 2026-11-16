@@ -74,7 +74,7 @@ transactions still roll back; completed processing remains preserved.
   earlier inputs. New/replaced upstream files remain detectable afterward.
 
 The full package organization is documented in the
-[workflow responsibility map](workflow_architecture.md). Run compatibility
+[workflow responsibility map](../Guides/workflow_architecture.md). Run compatibility
 lives in `workflows/checks/compatibility.py`; history, snapshots and transactions
 live alongside the file-management actions. Artifact provenance and viewer paths
 remain in `workflows/artifacts/`, separate from the shared checking workflow.
@@ -109,7 +109,7 @@ series/step scope is temporary runtime context and is not saved as a validity li
 The implementation and validation of stage-specific migration filenames,
 `backup/` storage, automatic replacement backups, shared completion dialogs and
 GUI navigation are recorded in [the follow-up plan](compaction_backups_completion_plan.md).
-The technical package map is [workflow architecture](workflow_architecture.md).
+The technical package map is [workflow architecture](../Guides/workflow_architecture.md).
 
 The optional partial-intermediate mode has been replaced by
 [full rebuilding](full_rebuild_plan.md). Migration still defaults to no numerical

@@ -1,7 +1,7 @@
 # Legacy BaxTrack integration: retrieval context
 
 This note records a read-only inspection of the old Python/Docker integration.
-Use it alongside [the future tracking plan](motion_assisted_tracking.md).
+Use it alongside [the future tracking plan](../motion_assisted_tracking.md).
 It describes historical code, not a supported installation procedure.
 
 ## Source snapshot

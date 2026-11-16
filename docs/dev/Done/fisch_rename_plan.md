@@ -15,7 +15,7 @@ Updated: 2026-11-11.
 - Include the reviewed existing local changes in the coordinated release.
 - Release ScopeIO 3.0.0 and the renamed application together; bump the
   application once. ScopeIO integration is recorded separately in
-  [the ScopeIO checklist](../scope_io_rename_plan.md).
+  [the ScopeIO checklist](../../scope_io_rename_plan.md).
 - Preserve the existing Git histories. Rename repositories rather than creating
   replacement repositories with new histories.
 - This document authorizes no code, repository, installation or data changes by
@@ -420,6 +420,11 @@ No numerical rebuild or data mutation was performed on that run by the agent.
 
 ### Agreed future behavior: rebuild only the common prefix
 
+Documentation review, 2026-11-16: this unfinished proposal is tracked in the
+[active common-prefix rebuild plan](../common_prefix_rebuild_plan.md). The
+completed rename/release record is archived here; the proposal below remains
+historical context, not implemented behaviour.
+
 If a historical numerical step is no longer available (for example old
 Segmentation has been replaced), reconstruct only the continuous common prefix
 before that step. Leave old downstream results intact and visibly outdated;
@@ -458,4 +463,4 @@ The startup and release suite passed 119 tests. ScopeIO passed 201 tests.
 FITS 4 users follow the one-time installer procedure. The running FITS 4
 launcher still expects the previous Python package name. Linux was verified on
 this host. Native Windows and macOS upgrades remain unverified.
-[Upgrade instructions](../user_guide/installation.md#upgrade-an-existing-fits-4-installation-to-fisch-5)
+[Upgrade instructions](../../user_guide/installation.md#upgrade-an-existing-fits-4-installation-to-fisch-5)

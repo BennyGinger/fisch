@@ -1,6 +1,6 @@
 # Development setup
 
-[Developer documentation](README.md)
+[Developer documentation](../README.md)
 
 ## Reference
 

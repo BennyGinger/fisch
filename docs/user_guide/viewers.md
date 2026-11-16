@@ -10,7 +10,7 @@ For a simple inventory of each tool's controls, see
 For tool-specific settings, see [segmentation](segmentation.md),
 [preprocessing](preprocessing.md), [tracking](tracking.md), and
 [reference/ROI drawing](reference_and_roi_masks.md). Developer details about
-storage and caches are in [runtime and viewer internals](../dev/runtime_and_viewer_internals.md).
+storage and caches are in [runtime and viewer internals](../dev/Guides/runtime_and_viewer_internals.md).
 
 ## Experiment browser
 

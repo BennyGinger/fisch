@@ -17,7 +17,7 @@ Start with the exact error and the latest report. Record the FIScH version, oper
 | Results look outdated or a run is read-only | Open Manage files and review [reprocessing/file management](reprocessing_and_file_management.md). |
 | A moved folder is reported as detached | Check that the [portable project](portable_projects.md) includes its containing run and metadata. |
 | Segmentation/tracking quality is poor | Inspect the [segmentation preview](segmentation.md) and [tracking results](tracking.md) before rerunning downstream analysis. |
-| GPU/model loading or memory problems occur | Keep the exact error; compare model/processing settings and the [GPU configuration](../dev/development_setup.md#default-gpu-setup). Model downloads can require internet access. |
+| GPU/model loading or memory problems occur | Keep the exact error; compare model/processing settings and the [GPU configuration](../dev/Guides/development_setup.md#default-gpu-setup). Model downloads can require internet access. |
 | Measurements are missing or repeated | Check [table row meanings and missing values](output_tables.md), the inputs, and enabled analyses. |
 | Insufficient disk space | Read the required/available sizes and review retained backups before retrying. |
 

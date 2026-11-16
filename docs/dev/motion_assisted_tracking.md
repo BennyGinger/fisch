@@ -5,7 +5,7 @@ Status: concept and proposed evaluation plan; implementation pending.
 Priority: evaluate and port the tracking-only path of Baxter Algorithms,
 including its `ctc2024` update, before developing a new tracking algorithm.
 
-Historical reference: [legacy BaxTrack integration](baxter_legacy_context.md)
+Historical reference: [legacy BaxTrack integration](Guides/baxter_legacy_context.md)
 records the 2023 Docker commit, Python/MATLAB call contract, settings, and
 retrieval commands for the old pipeline.
 

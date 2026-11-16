@@ -1,6 +1,6 @@
 # Runtime and viewer internals
 
-[Developer documentation](README.md)
+[Developer documentation](../README.md)
 
 ## Reference
 

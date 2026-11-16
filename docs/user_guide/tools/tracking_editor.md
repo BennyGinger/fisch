@@ -53,7 +53,7 @@ predictor. The editor supports track merge/link, stopping or unlinking a track,
 mask/track deletion, and undo. Saves use the edited-tracking filenames above
 and record compact edit provenance. Redo, a replayable per-edit log, and the
 static-only temporal policy remain pending; see the
-[tracking TODOs](../../dev/todos.txt) and [micro-SAM cleanup plan](../../dev/microsam_tracking_cleanup.md).
+[tracking-editor follow-ups](../../dev/tracking_editor_followups.md) and [micro-SAM cleanup plan](../../dev/microsam_tracking_cleanup.md).
 
 ## Measurements after editing
 

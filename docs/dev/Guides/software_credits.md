@@ -1,6 +1,6 @@
 # Software credits and citation guidance
 
-[Developer documentation](README.md) · [Project README](../../README.md#citations-and-acknowledgments)
+[Developer documentation](../README.md) · [Project README](../../../README.md#citations-and-acknowledgments)
 
 FIScH combines independently maintained scientific libraries with its own workflow
 and companion packages. Credit the upstream methods actually used in your
@@ -44,7 +44,7 @@ method citation for every analysis. Follow applicable upstream citation requests
 | [bioimage-cpp](https://pypi.org/project/bioimage-cpp/), [pooch](https://www.fatiando.org/pooch/), [xxhash](https://github.com/ifduyue/python-xxhash), [Zarr](https://zarr.dev/) | Additional declared dependencies of the headless µSAM integration. |
 
 Exact dependency versions and further transitive dependencies are recorded in
-[`uv.lock`](../../uv.lock). This page highlights the libraries declared by FIScH,
+[`uv.lock`](../../../uv.lock). This page highlights the libraries declared by FIScH,
 its companion packages, and the headless µSAM integration; it is not an inventory
 of every transitive package.
 

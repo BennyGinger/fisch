@@ -140,5 +140,5 @@ independent table viewer.
 
 FIScH's companion libraries—**scope_io, cellpose_kit, stackalign, bg_sub, tracklink,
 mask_interpolation, bioimagequant, and progress_bar**—connect these tools to the
-workflow. See [software credits and citation guidance](docs/dev/software_credits.md)
+workflow. See [software credits and citation guidance](docs/dev/Guides/software_credits.md)
 for project links, method references, and supporting-library acknowledgments.

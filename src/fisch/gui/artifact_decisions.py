@@ -5,13 +5,16 @@ from __future__ import annotations
 from PySide6.QtWidgets import QWidget, QDialog, QDialogButtonBox, QLabel, QPlainTextEdit, QTabWidget, QVBoxLayout
 from fisch.workflows.checks.models import PreflightReport
 from fisch.gui.file_preview.review import size_file_review
-from fisch.gui.artifact_lineage import ArtifactLineageWidget
+from fisch.gui.artifact_lineage import ArtifactLineageWidget, lineage_groups
+from fisch.gui.file_management.tasks import run_file_task
 
 
 def choose_artifacts(report: PreflightReport, parent: QWidget | None = None, *, compact: bool = False) -> str:
     """
     Choose artifacts.
     """
+    groups = run_file_task(lambda: lineage_groups(report), parent,
+                           title='Processing', message='Preparing the conflict review and file relationships…')
     dialog = QDialog(parent)
     dialog.setWindowTitle("Earlier-version results" if report.legacy else "Review artifact conflicts")
     layout = QVBoxLayout(dialog)
@@ -30,7 +33,7 @@ def choose_artifacts(report: PreflightReport, parent: QWidget | None = None, *, 
     details = QPlainTextEdit(report.describe())
     details.setReadOnly(True)
     tabs = QTabWidget()
-    tabs.addTab(ArtifactLineageWidget(report, compact=compact), "Run overview")
+    tabs.addTab(ArtifactLineageWidget(report, compact=compact, groups=groups), "Run overview")
     tabs.addTab(details, "Full details")
     layout.addWidget(tabs, 1)
     buttons = QDialogButtonBox()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 from collections.abc import Callable, Sequence
 from functools import partial
+from dataclasses import dataclass
 from typing import Any
 from pathlib import Path
 from PySide6.QtCore import QItemSelectionModel, QSize, Qt, QTimer
@@ -31,7 +32,7 @@ from fisch.gui.file_preview.portable import portable_changes
 from fisch.gui.file_preview.backups import restoration_changes
 from fisch.gui.file_preview.review import review_tabs, size_file_review
 from fisch.gui.file_preview.migration import MigrationPreviewWidget
-from fisch.gui.file_management.guidance import FileGuidanceWidget, file_guidance
+from fisch.gui.file_management.guidance import FileGuidance, FileGuidanceWidget, file_guidance
 from fisch.gui.file_management.reset import confirm_reset
 from fisch.gui.file_management.icons import restore_icon
 from fisch.workflows.file_management.reset import plan_reset
@@ -217,7 +218,10 @@ def _migration_action(root: Path,
     """
     Review migration separately from optional numerical reconstruction.
     """
-    plan = api.plan_migration(root)
+    plan = run_file_task(lambda: api.plan_migration(root), parent,
+                         title='Preparing migration review',
+                         message='Inspecting existing experiments and planning migration…',
+                         )
     if plan is None:
         _set_notice(notice, 'There are no files to migrate. This run already uses the current format and folder structure.')
         return None
@@ -562,6 +566,36 @@ def _file_actions_panel(guidance: FileGuidanceWidget,
     return group
 
 
+@dataclass(frozen=True)
+class _ManagementInspection:
+    """Store file-action checks prepared before building dialog controls."""
+
+    status: RunCompatibility
+    entries: tuple[Snapshot, ...]
+    unavailable: dict[str, str]
+    primary: tuple[str, str, str]
+    guidance: FileGuidance
+
+
+def _inspect_management(root: Path,
+                        selected: Path | None,
+                        compatibility: RunCompatibility | None,
+                        input_problem: str,
+                        input_warning: str,
+                        ) -> _ManagementInspection:
+    """
+    Inspect results, backups and available actions without touching GUI widgets.
+    """
+    status = compatibility or inspect_run_compatibility(root)
+    report = inspect_run(root, run_config(root), for_execution=False) if not status.outdated else None
+    locations = inspect_locations(root, status.states) if not status.outdated else LocationReport()
+    entries = snapshots(root, selected)
+    reviews = geometry_reviews(root)
+    unavailable = _unavailable_actions(status, report, locations, reviews)
+    guidance = file_guidance(status, report, locations, reviews, input_problem=input_problem, input_warning=input_warning)
+    return _ManagementInspection(status, entries, unavailable, _primary_action(status, report), guidance)
+
+
 def manage_files(root: str | Path,
                  selected: Path | None = None,
                  parent: QWidget | None = None,
@@ -570,17 +604,16 @@ def manage_files(root: str | Path,
                  input_problem: str = '',
                  input_warning: str = '',
                  labels_saved: Callable[[dict[str, str]], None] | None = None,
+                 compatibility: RunCompatibility | None = None,
                  ) -> bool:
     """
     Present run-wide file actions and execute only an accepted review after closing.
     """
     root = Path(root).resolve()
-    status = inspect_run_compatibility(root)
-    report = inspect_run(root, run_config(root), for_execution=False) if not status.outdated else None
-    locations = inspect_locations(root, status.states) if not status.outdated else LocationReport()
-    entries = snapshots(root, selected)
-    reviews = geometry_reviews(root)
-    unavailable = _unavailable_actions(status, report, locations, reviews)
+    inspection = run_file_task(lambda: _inspect_management(root, selected, compatibility, input_problem, input_warning), parent,
+                               title='Processing', message='Inspecting experiment files, backups and available file actions…')
+    status, entries = inspection.status, inspection.entries
+    unavailable = inspection.unavailable
     processing_runner = run_processing or partial(_run_cli_processing, root)
     dialog = _FileManagerDialog(parent)
     dialog.setWindowTitle('Manage experiment files')
@@ -600,8 +633,7 @@ def manage_files(root: str | Path,
     scroll.setWidget(content)
     layout.addWidget(scroll)
     notice = QLabel(dialog)
-    guidance = FileGuidanceWidget(file_guidance(status, report, locations, reviews,
-                                               input_problem=input_problem, input_warning=input_warning), notice)
+    guidance = FileGuidanceWidget(inspection.guidance, notice)
     guidance.details_toggled.connect(lambda _expanded: QTimer.singleShot(0, dialog, partial(_fit_manager_height, dialog)))
     pending: list[Callable[[], Any] | None] = [None]
     renamed = False
@@ -631,7 +663,7 @@ def manage_files(root: str | Path,
         except Exception as error:
             _set_notice(notice, str(error))
 
-    content_layout.addWidget(_file_actions_panel(guidance, _primary_action(status, report), choose, unavailable))
+    content_layout.addWidget(_file_actions_panel(guidance, inspection.primary, choose, unavailable))
     label_group = QGroupBox("Channel labels")
     label_layout = QVBoxLayout(label_group)
     if status.outdated:

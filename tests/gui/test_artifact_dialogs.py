@@ -50,6 +50,9 @@ def test_shared_preflight_choices(tmp_path: Path, title: str, expected: str, leg
         """
         dialog = app.activeModalWidget()
         assert isinstance(dialog, QDialog)
+        if dialog.windowTitle() == 'Processing':
+            QTimer.singleShot(10, choose)
+            return
         button = next(button for button in dialog.findChildren(QPushButton) if button.text() == title)
         button.click()
     QTimer.singleShot(0, choose)

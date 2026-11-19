@@ -17,6 +17,8 @@ from fisch.gui.main import _run_gui
 from fisch.gui.main_window import FischMainWindow
 from fisch.gui.settings import SettingsAdapter
 
+pytestmark = pytest.mark.usefixtures('inline_inspection_dialogs')
+
 
 @pytest.fixture
 def app() -> QApplication:

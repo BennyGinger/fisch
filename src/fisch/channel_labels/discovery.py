@@ -15,6 +15,7 @@ from fisch.environment import constant as cst
 from fisch.settings.loader import run_settings_path
 from fisch.environment.paths import experiment_state_path
 from fisch.workflows.experiments import discover_saved_states
+from fisch.workflows.artifacts.provenance import read_metadata
 
 
 _TIFF_NAMES = {name for name in cst.MANAGED_NAMES if name.endswith(".tif")}
@@ -31,9 +32,9 @@ def _tiff_name(name: str) -> bool:
     return (name in _TIFF_NAMES or name.startswith(prefixes)) and name.endswith(".tif")
 
 
-def _fingerprint(path: Path) -> tuple[int, int]:
+def file_fingerprint(path: Path) -> tuple[int, int]:
     """
-    Return the current fingerprint.
+    Return file size and nanosecond modification time for stale-plan checks.
     """
     stat = path.stat()
     return stat.st_size, stat.st_mtime_ns
@@ -47,19 +48,19 @@ def inspect_run(run_dir: str | Path) -> LabelPlan:
     if not root.is_dir():
         raise ValueError(f"Run directory does not exist: {root}")
     with run_write_guard(root):
-        return _inspect_unlocked(root)
+        return inspect_files(root)
 
 
-def _inspect_unlocked(root: Path) -> LabelPlan:
+def inspect_files(root: Path, *, include_settings: bool = True) -> LabelPlan:
     """
-    Inspect unlocked.
+    Inspect managed files without acquiring a writer lock or creating metadata.
     """
     tiffs = sorted(p for p in root.rglob("*.tif") if _tiff_name(p.name)
                    and not is_internal_path(p, root))
     tables = sorted(p for p in root.rglob("*.parquet") if p.name in _TABLE_NAMES
                     and not is_internal_path(p, root))
     settings_path = run_settings_path(root)
-    settings = (settings_path,) if settings_path.is_file() else ()
+    settings = (settings_path,) if include_settings and settings_path.is_file() else ()
     states = tuple(experiment_state_path(state.workdir) for state in discover_saved_states(root))
     labels: dict[int, str] = {}
     origins: dict[int, Path] = {}
@@ -107,7 +108,7 @@ def _inspect_unlocked(root: Path) -> LabelPlan:
                                          f"in {origins[index]} but {label!r} in {path}.")
         file_labels[path] = labels_in_state(path)
     for path in tables:
-        file_labels[path] = labels_in_table(path)
+        file_labels[path] = labels_in_table(path) | labels_in_workflow_meta(read_metadata(path).custom_metadata)
     files = (*tiffs, *tables, *settings, *states)
     return LabelPlan(root,
                      tuple(sorted(labels.items())),
@@ -116,7 +117,7 @@ def _inspect_unlocked(root: Path) -> LabelPlan:
                      settings,
                      states,
                      tuple((p, file_labels[p]) for p in files),
-                     tuple((p, _fingerprint(p)) for p in files),
+                     tuple((p, file_fingerprint(p)) for p in files),
                      )
 
 
@@ -132,6 +133,8 @@ def validate_labels(plan: LabelPlan, proposed: Mapping[int, str]) -> dict[int, s
         raise ValueError("Channel labels cannot be empty.")
     if len(set(labels.values())) != len(labels):
         raise ValueError("Channel labels must be unique.")
+    if plan.conversion_labels is not None and any(value != plan.conversion_labels[index] for index, value in labels.items()):
+        raise ValueError('Conversion labels changed since inspection. Prepare the label update again.')
     return labels
 
 
@@ -140,6 +143,10 @@ def files_to_update(plan: LabelPlan, proposed: Mapping[int, str]) -> tuple[Path,
     Return only files referencing a source channel whose label will change.
     """
     labels = validate_labels(plan, proposed)
+    if plan.file_mappings:
+        mappings = dict(plan.file_mappings)
+        return tuple(path for path, present in plan.file_labels
+                     if any(old in present and old != new for old, new in mappings[path]))
     changed = {old for index, old in plan.labels if labels[index] != old}
     return tuple(path for path, present in plan.file_labels if changed.intersection(present))
 

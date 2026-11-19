@@ -12,6 +12,7 @@ from fisch.gui.settings import SettingsAdapter
 from fisch.workflows.experiments import ExperimentState, save_experiment_state, discover_saved_states
 
 _APP = None
+pytestmark = pytest.mark.usefixtures('inline_inspection_dialogs')
 
 
 @pytest.fixture
@@ -121,6 +122,35 @@ def test_runtime_retains_space_only_and_promotes_series_to_run(current_window, t
     _APP.processEvents()
     assert Path(window.adapter.run_dir) == tmp_path
     assert window.run_browser.selected_path == series
+
+
+def test_open_new_run_with_portable_acquisitions(current_window: tuple[FischMainWindow, Path], tmp_path: Path) -> None:
+    """
+    Open rearranged acquisitions with template settings despite nested old metadata.
+    """
+    import shutil
+
+    window, series = current_window
+    destination = tmp_path / 'combined'
+    subgroup = destination / 'subgroup'
+    subgroup.mkdir(parents=True)
+    shutil.move(series.parent, subgroup / 'image')
+    shutil.move(tmp_path / '.pipeline', subgroup / '.pipeline')
+    tifffile.imwrite(destination / 'fresh.tif', np.ones((8, 8), dtype=np.uint16), photometric='minisblack')
+    old_settings = subgroup / '.pipeline/settings.toml'
+    before = old_settings.read_bytes()
+
+    window._switch_run_dir(str(destination))
+    assert Path(window.adapter.run_dir) == destination
+    assert window.adapter.user_name == SettingsAdapter().user_name
+    assert len(discover_saved_states(destination)) == 1
+    assert not (destination / '.pipeline/settings.toml').exists()
+    assert old_settings.read_bytes() == before
+
+    saved = window.adapter.save_to_run_dir()
+    assert saved == destination / '.pipeline/settings.toml'
+    window._switch_run_dir(str(destination / 'new_condition'))
+    assert Path(window.adapter.run_dir) == destination
 
 
 def test_manage_refresh_runs_after_review_and_cancel_preserves_files(current_window, tmp_path, monkeypatch):

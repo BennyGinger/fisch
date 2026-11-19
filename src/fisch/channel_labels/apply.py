@@ -9,7 +9,7 @@ from copy import deepcopy
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from scope_io import ScopeIO
-from fisch.channel_labels.discovery import _fingerprint, files_to_update, validate_labels
+from fisch.channel_labels.discovery import file_fingerprint, files_to_update, validate_labels
 from fisch.channel_labels.documents import rename_workflow_meta, rename_table, render_settings, render_state
 from fisch.channel_labels.lock import run_write_guard
 from fisch.channel_labels.model import LabelPlan
@@ -43,9 +43,10 @@ def _apply_unlocked(plan: LabelPlan,
         if path in plan.tiffs or (path in plan.tables and not path.name.startswith("master_")):
             require_writable(path)
     for path, fingerprint in plan.fingerprints:
-        if _fingerprint(path) != fingerprint:
+        if file_fingerprint(path) != fingerprint:
             raise RuntimeError(f"{path} changed since inspection. Inspect the run again.")
     mapping = {old: labels[index] for index, old in plan.labels}
+    file_mappings = dict(plan.file_mappings)
     updated: list[Path] = []
     # Hard links keep large image backups cheap on local filesystems. On shares
     # without hard-link support, make a real copy before changing anything.
@@ -62,21 +63,23 @@ def _apply_unlocked(plan: LabelPlan,
             backups[path] = backup
         total = len(targets)
         for number, path in enumerate(targets, 1):
+            current_mapping = dict(file_mappings[path]) if file_mappings else mapping
             updated.append(path)
             try:
                 if path in plan.tiffs:
                     reader = ScopeIO.from_path(path)
                     new = [labels[index] for index in reader.artifact_channel_indices]
                     custom = deepcopy(dict(reader.metadata.custom_metadata))
-                    rename_workflow_meta(custom, mapping)
+                    rename_workflow_meta(custom, current_mapping, conversion_labels=plan.conversion_labels)
                     if new != reader.channel_labels or custom != reader.metadata.custom_metadata:
                         reader.set_channel_labels(new, custom_metadata=custom)
                 elif path in plan.tables:
-                    atomic_table(rename_table(path, mapping), path, mapping=mapping)
+                    atomic_table(rename_table(path, current_mapping), path, mapping=current_mapping,
+                                 conversion_labels=plan.conversion_labels)
                 elif path in plan.settings:
-                    atomic_bytes(path, render_settings(path, mapping))
+                    atomic_bytes(path, render_settings(path, current_mapping))
                 else:
-                    atomic_bytes(path, render_state(path, mapping))
+                    atomic_bytes(path, render_state(path, current_mapping, conversion_labels=plan.conversion_labels))
             except Exception as error:
                 raise RuntimeError(f"Could not update {path}: {error}") from error
             if progress:

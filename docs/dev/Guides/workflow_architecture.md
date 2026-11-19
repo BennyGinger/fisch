@@ -18,8 +18,14 @@ supporting implementations live in the responsibility packages below it.
 ## Experiment and artifact inspection
 
 - `experiments/acquisitions.py`: group an original acquisition and its series.
-- `experiments/roots.py`: recognize run roots and resolve selections inside
-  processed experiments.
+- `experiments/conversion.py`: read conversion coverage and imported channel
+  names by source index. GUI startup requires coverage of every active original's
+  expected series before opening processing directly.
+- `experiments/roots.py`: resolve the selected folder or its nearest established
+  parent run, otherwise accept the selection as a new run, including mixed fresh
+  and portable processed acquisitions. Shared by GUI and CLI. Descendant run
+  metadata does not determine the selected root or its processing settings.
+
 - `checks/compatibility.py`: `inspect_run_compatibility()` inventories format/layout
   problems; `require_current_run()` enforces the read-only boundary before migration.
 - `checks/artifacts.py`: `inspect_run()` compares recorded input revisions with
@@ -37,9 +43,48 @@ supporting implementations live in the responsibility packages below it.
 - `artifacts/provenance.py`: metadata reading, compatibility, input references and
   creation of output revision metadata. FIScH-specific logic stays out of scope_io.
 - `artifacts/paths.py`: locate current/compacted images and resolve viewer/tuner
-  inputs through the same step contracts used by execution.
+  inputs through the step contracts used by execution. Tuners prefer their planned
+  input, but may preview an available enabled upstream image (including converted
+  raw) when that input is absent. A callback retains a visible input warning.
+  Execution's `resolve_inputs()` remains strict; preview fallback does not change
+  pipeline processing or relink stale provenance.
 - `artifacts/branch_masks.py`: validate REF/ROI registration dependencies and
   refresh accepted metadata without changing drawing pixels.
+
+Convert's Next action prepares acquisition-local label mappings through
+`channel_labels/conversion.py`, then reuses the existing label transaction and
+rollback before starting fresh conversion. Per-file mappings allow mixed imported
+names without renaming source acquisitions or image pixels. Conversion-label
+provenance is updated to the effective requested names, including originally
+implicit defaults. Draft settings follow unambiguous old-to-new mappings; Convert's
+requested values remain authoritative. Saving settings and Run pipeline do not
+invoke this operation. See the [implementation record](../Done/conversion_import_labels.md).
+
+GUI inventory excludes absent master tables from outdated-result reporting.
+Initial run loading executes inventory, raw metadata and size checks in the
+existing `run_file_task` worker with a Processing dialog, then applies the results
+to GUI controls on the main thread. Saved settings are loaded before that single
+inspection, avoiding a preliminary scan with template settings.
+The wait screen remains visible while results are applied on the GUI thread.
+Image channel names and imported-label suggestions are read in the worker and
+cached; phase access reuses inventory rather than repeatedly searching the tree.
+Manage files likewise prepares result checks, backup inventory, geometry reviews,
+guidance and action availability in a background task. Main-window opening reuses
+its fresh compatibility check and saves settings without a redundant full scan.
+Tuner Apply callbacks rebuild controls from the current draft and cached inventory;
+they do not invoke full run inspection. Embedded SegTune/compartment and background
+draft updates do not run filesystem write checks. Standalone settings saves and
+registration-cache writes retain compatibility checks, executed by the shared
+background task dialog. Main Save settings and Run still refresh the checks normally.
+GUI launch checks source metadata in a background task and saves settings without
+repeating the full GUI inventory; the worker's preflight remains authoritative.
+Conflict diagrams use one index of normalized report paths and experiment-local
+record/planned-output groups. Graph preparation runs behind the Processing dialog;
+Qt widgets consume the prepared groups on the main thread. Review choices and
+execution decisions are unchanged, and graph construction does not rescan artifacts.
+Execution checks retain missing-master planning. Conversion comparisons resolve
+effective labels, using shared source colors and recorded artifact names rather
+than treating an empty label list as a different processing operation by itself.
 
 Format/layout status is separate from stale-result checks: a run can use the
 current format while some downstream results need attention.

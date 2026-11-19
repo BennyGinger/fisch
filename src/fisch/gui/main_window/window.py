@@ -41,6 +41,7 @@ from fisch.gui.main_window.emergency_stop import terminate_application
 from fisch.gui.main_window.stop_dialog import QUIT_STYLE, confirm_stop
 from fisch.gui.viewer.common.tuner_actions import CLOSE_WINDOW_STYLE
 from fisch.gui.main_window.progress_display import PipelineProgressWidget
+from fisch.gui.main_window.inspection import RunInspection
 from fisch.settings.models import BGSubSettings, RegisterChannelSettings, RegisterTimeSettings, SegmentSettings
 from fisch.tasks.registration.registration_resolver import resolve_registration_plan
 from fisch.settings.loader import run_settings_path, write_settings
@@ -57,6 +58,9 @@ from fisch.gui.segmentation_models.loader import model_options_loader
 from fisch.gui.segmentation_models.options import CellposeModelOptions
 from fisch.workflows.runtime.errors import PipelineCancelled
 from fisch.channel_labels import rename_settings_document
+from fisch.channel_labels import apply_labels, files_to_update
+from fisch.channel_labels.conversion import prepare_conversion_labels
+from fisch.workflows.experiments.conversion import imported_channel_names, needs_conversion
 from fisch.workflows.file_management.rebuild import execution_config
 from fisch.workflows.runtime.scheduler.planning import resolve_runtime_steps
 from fisch.workflows.checks.artifacts import inspect_run
@@ -108,6 +112,8 @@ class FischMainWindow(QMainWindow):
         self._thread: QThread | None = None
         self._worker: PipelineWorker | None = None
         self._running = False
+        self._imported_channel_names: dict[int, tuple[str, ...]] = {}
+        self._conversion_relabel_count = 0
         self._upgrading = False
         self._maintenance_plan: ProcessingPlan | None = None
         self._run_error = ""
@@ -149,7 +155,7 @@ class FischMainWindow(QMainWindow):
         self.setAcceptDrops(True)
         self.resize(1200, 850)
         self._build_ui()
-        self._populate_from_adapter()
+        self._populate_from_adapter(inspect_with_progress=True)
         loader = model_options_loader()
         loader.ready.connect(self._segmentation_models_ready)
         loader.failed.connect(self._segmentation_models_failed)
@@ -457,7 +463,7 @@ class FischMainWindow(QMainWindow):
         }
         show_help(self, title="FIScH", gui="Main", guide_page=pages.get(self._current_step, "README.md"))
 
-    def _populate_from_adapter(self) -> None:
+    def _populate_from_adapter(self, *, inspect_with_progress: bool = False, refresh_inventory: bool = True) -> None:
         """
         Populate from adapter.
         """
@@ -557,13 +563,18 @@ class FischMainWindow(QMainWindow):
         for step in (cst.StepName.CONVERT, cst.StepName.SEGMENT):
             self._editors[step].value_changed.connect(self._refresh_channel_choices)
 
-        self._refresh_run_inventory()
+        if refresh_inventory:
+            self._refresh_run_inventory(show_progress=inspect_with_progress)
+        else:
+            self._apply_raw_input_report(self._raw_input_report)
+            self._selection_status_changed(self.run_browser.selected_path)
         self._refresh_phase_access()
         root = self._conversion_signature()["run_dir"]
         if root != self._conversion_root:
             self._conversion_root = root
-            self._converted_settings = self._conversion_signature() if self._prepared_available else None
-            previous_step = cst.StepName.REGISTER_TIME if self._prepared_available else cst.StepName.CONVERT
+            ready = self._prepared_available and not self._needs_conversion()
+            self._converted_settings = self._conversion_signature() if ready else None
+            previous_step = cst.StepName.REGISTER_TIME if ready else cst.StepName.CONVERT
         elif previous_step != cst.StepName.CONVERT and not self._conversion_is_current():
             previous_step = cst.StepName.CONVERT
         self._show_step(previous_step)
@@ -671,7 +682,7 @@ class FischMainWindow(QMainWindow):
         expanded = self._tuner_expanded_sections(cst.StepName.BG_SUB, settings)
         for key, value in {**settings.to_payload_dict(), "overwrite": settings.overwrite}.items():
             self.adapter.set_field_value(cst.StepName.BG_SUB, key, "None" if value is None else value)
-        self._populate_from_adapter()
+        self._populate_from_adapter(refresh_inventory=False)
         for name in expanded:
             self._editors[name].show_advanced_settings()
         self._show_step(cst.StepName.BG_SUB)
@@ -811,7 +822,7 @@ class FischMainWindow(QMainWindow):
         expanded = self._tuner_expanded_sections(step, settings)
         for key, value in {**settings.to_payload_dict(), "overwrite": settings.overwrite}.items():
             self.adapter.set_field_value(step, key, "None" if value is None else value)
-        self._populate_from_adapter()
+        self._populate_from_adapter(refresh_inventory=False)
         for name in expanded:
             self._editors[name].show_advanced_settings()
         self._show_step(step)
@@ -824,7 +835,7 @@ class FischMainWindow(QMainWindow):
         """
         expanded = {name for name, editor in self._editors.items() if editor.advanced_settings_visible}
         self.adapter.set_segment_channels([entry.to_payload_dict() for entry in settings.channels])
-        self._populate_from_adapter()
+        self._populate_from_adapter(refresh_inventory=False)
         for name in expanded:
             self._editors[name].show_advanced_settings()
         self._show_step(cst.StepName.SEGMENT)
@@ -837,7 +848,7 @@ class FischMainWindow(QMainWindow):
         expanded = {name for name, editor in self._editors.items() if editor.advanced_settings_visible}
         for name in ("compartments", "membrane_thickness", "dilation_radius", "save_compartment_masks"):
             self.adapter.set_field_value(cst.StepName.EXTRACT, name, getattr(settings, name))
-        self._populate_from_adapter()
+        self._populate_from_adapter(refresh_inventory=False)
         for name in expanded:
             self._editors[name].show_advanced_settings()
         self._show_step(cst.StepName.EXTRACT)
@@ -934,7 +945,10 @@ class FischMainWindow(QMainWindow):
         prepared = False
         if root is not None and root.is_dir():
             try:
-                prepared = first_image(root) is not None
+                if not self._running and self._run_status is not None and self._run_status.root == root.resolve():
+                    prepared = any(path.name in cst.IMAGE_NAMES and path.is_file() for path in self._run_status.files)
+                else:
+                    prepared = first_image(root) is not None
             except OSError:
                 prepared = False
         self._prepared_available = prepared
@@ -979,7 +993,67 @@ class FischMainWindow(QMainWindow):
         """
         Conversion is current.
         """
-        return self._prepared_available and self._converted_settings == self._conversion_signature()
+        return (self._prepared_available and not self._needs_conversion()
+                and self._converted_settings == self._conversion_signature())
+
+    def _needs_conversion(self) -> bool:
+        """
+        Check all active originals rather than treating one saved image as completion.
+        """
+        states = self._run_status.states if self._run_status is not None else ()
+        return needs_conversion(self._raw_input_report, states)
+
+    def _apply_convert_channel_labels(self) -> bool:
+        """
+        Apply explicit Convert labels to existing results before fresh conversion.
+        """
+        root = Path(self.adapter.run_dir)
+        labels = self.adapter.source_channel_labels()
+        if not labels or not self._prepared_available:
+            return True
+        try:
+            update = run_file_task(lambda: prepare_conversion_labels(root, labels), self,
+                                   title='Checking channel labels',
+                                   message='Comparing the chosen labels with processed acquisitions…',
+                                   )
+            if update is None or not files_to_update(update.plan, update.proposed):
+                self._remember_conversion_labels(update.mapping if update is not None else {})
+                return True
+            self._append_log(f'WARNING | Updating channel labels in {update.acquisition_count} processed acquisitions '
+                             'before converting fresh inputs. Image pixels and original inputs stay unchanged.')
+            run_file_task(lambda: apply_labels(update.plan, update.proposed), self,
+                           title='Updating channel labels',
+                           message='Updating processed images, masks, tables and provenance…',
+                           )
+            requested = self.adapter.field_value(cst.StepName.CONVERT, 'channel_labels')
+            rename_settings_document(self.adapter.document, update.mapping)
+            self.adapter.set_field_value(cst.StepName.CONVERT, 'channel_labels', requested)
+            self._populate_from_adapter()
+            self._remember_conversion_labels(update.mapping)
+            self._conversion_relabel_count = update.acquisition_count
+            self._append_log(f'WARNING | Channel labels updated in {update.acquisition_count} processed acquisitions. '
+                             'Existing processing results have been retained.')
+            return True
+        except (OSError, RuntimeError, ValueError) as error:
+            self._report_validation_errors([f'Channel-label update failed; conversion has not started. {error}'])
+            return False
+
+    def _remember_conversion_labels(self, mapping: Mapping[str, str]) -> None:
+        """
+        Record applied label edits without accepting changes to conversion geometry.
+        """
+        if self._converted_settings is None:
+            records = ([record for record in self._artifact_report.records if record.step == cst.StepName.CONVERT]
+                       if self._artifact_report is not None else [])
+            if not self._needs_conversion() and records and not any(record.problem for record in records):
+                self._converted_settings = self._conversion_signature()
+            return
+        self._converted_settings = deepcopy(self._converted_settings)
+        params = self._converted_settings['params']
+        params['channel_labels'] = deepcopy(self.adapter.field_value(cst.StepName.CONVERT, 'channel_labels'))
+        exported = params.get('export_channels', 'all')
+        if isinstance(exported, list):
+            params['export_channels'] = [mapping.get(label, label) for label in exported]
 
     @Slot()
     def _primary_action(self) -> None:
@@ -1012,6 +1086,19 @@ class FischMainWindow(QMainWindow):
             return
         if not self.adapter.step_enabled(cst.StepName.CONVERT):
             self._report_validation_errors(["Include Convert in the workflow before continuing."])
+            return
+        input_error = self._raw_input_error()
+        if input_error:
+            self._report_validation_errors([input_error])
+            return
+        self._conversion_relabel_count = 0
+        if not self._apply_convert_channel_labels():
+            return
+        if self._conversion_is_current() and not self.adapter.field_value(cst.StepName.CONVERT, 'overwrite'):
+            if self._save_settings() is None:
+                return
+            self._converted_settings = self._conversion_signature()
+            self._show_step(cst.StepName.REGISTER_TIME)
             return
         self._launch_pipeline(convert_only=True)
 
@@ -1115,12 +1202,13 @@ class FischMainWindow(QMainWindow):
         # Each selected folder starts from the template, never the previous run.
         self.adapter = SettingsAdapter(template_path=self.adapter.template_path)
         self.adapter.run_dir = str(resolved)
-        self._populate_from_adapter()
 
         saved_settings = run_settings_path(resolved)
         if saved_settings.is_file():
-            self._load_settings_path(saved_settings, run_dir=resolved)
+            if not self._load_settings_path(saved_settings, run_dir=resolved, inspect_with_progress=True):
+                self._populate_from_adapter(inspect_with_progress=True)
         else:
+            self._populate_from_adapter(inspect_with_progress=True)
             self._append_log(f"Loaded template settings for {resolved}")
         if selected != resolved:
             self.run_browser.select_path(selected)
@@ -1228,7 +1316,7 @@ class FischMainWindow(QMainWindow):
             return
         self._append_log(f"Saved protocol to {destination}")
 
-    def _load_settings_path(self, path: Path, *, run_dir: Path | None = None) -> None:
+    def _load_settings_path(self, path: Path, *, run_dir: Path | None = None, inspect_with_progress: bool = False) -> bool:
         """
         Load settings path.
         """
@@ -1253,14 +1341,15 @@ class FischMainWindow(QMainWindow):
             self.adapter.source_path = previous_source
             QMessageBox.critical(self, "Cannot load settings", str(error))
             self._schedule_settings_population_finish()
-            return
+            return False
         if run_dir is not None:
             self._conversion_root = None
-        self._populate_from_adapter()
+        self._populate_from_adapter(inspect_with_progress=inspect_with_progress)
         self._append_log(f"Loaded settings from {path}")
+        return True
 
     @Slot()
-    def _save_settings(self) -> Path | None:
+    def _save_settings(self, *, refresh_inventory: bool = True) -> Path | None:
         """
         Save settings.
         """
@@ -1279,7 +1368,8 @@ class FischMainWindow(QMainWindow):
             QMessageBox.critical(self, "Cannot save settings", str(error))
             return None
         self._append_log(f"Saved settings to {destination}")
-        self._refresh_run_inventory()
+        if refresh_inventory:
+            self._refresh_run_inventory()
         return destination
 
     @Slot()
@@ -1314,7 +1404,13 @@ class FischMainWindow(QMainWindow):
         Launch pipeline.
         """
         root = Path(self.adapter.run_dir).expanduser() if self.adapter.run_dir else None
-        self._refresh_raw_inputs(root)
+        states = self._run_status.states if self._run_status is not None else ()
+        if root is not None and root.is_dir():
+            run_file_task(lambda: inspect_raw_inputs(root, active_raw_files(collect_supported_files(root), states)), self,
+                          title='Processing', message='Checking input channels and frames before starting…',
+                          apply_result=self._apply_raw_input_report)
+        else:
+            self._refresh_raw_inputs(root)
         if convert_only or self.adapter.step_enabled(cst.StepName.CONVERT):
             input_error = self._raw_input_error()
             if input_error:
@@ -1327,7 +1423,7 @@ class FischMainWindow(QMainWindow):
                 self._report_validation_errors(list(problems.values()))
                 return
         self._sync_identity()
-        settings_path = self._save_settings()
+        settings_path = self._save_settings(refresh_inventory=False)
         if settings_path is None:
             return
         self._mask_expected_count = None
@@ -1348,7 +1444,7 @@ class FischMainWindow(QMainWindow):
                                 handler,
                                 self.demo_step_delay,
                                 convert_only=convert_only,
-                                force_conversion=convert_only and self._prepared_available,
+                                force_conversion=False,
                                 upgrading=self._upgrading,
                                 )
         worker.maintenance = self._maintenance_plan
@@ -1387,7 +1483,34 @@ class FischMainWindow(QMainWindow):
             self._next_artifact_decision = None
             worker.interaction.decisions.put(decision)
 
-    def _refresh_run_inventory(self) -> None:
+    @staticmethod
+    def _inspect_run_inventory(root: Path | None,
+                               config: Mapping[str, Any],
+                               ) -> RunInspection:
+        """
+        Read inventory and source metadata without accessing GUI objects.
+        """
+        if root is None or not root.is_dir():
+            return RunInspection()
+        status = inspect_run_compatibility(root)
+        size = file_bytes(root.rglob('*'))
+        artifacts = inspect_run(root, config, for_execution=False) if not status.outdated else None
+        locations = inspect_locations(root, status.states) if not status.outdated else LocationReport()
+        raw = inspect_raw_inputs(root, active_raw_files(collect_supported_files(root), status.states))
+        images: dict[Path, Path] = {}
+        for path in status.files:
+            if path.name in cst.IMAGE_NAMES and (path.parent not in images or path.name == cst.ARRAY_RAW):
+                images[path.parent] = path
+        channels: dict[Path, tuple[str, ...]] = {}
+        for path in images.values():
+            try:
+                channels[path] = tuple(ScopeIO.from_path(path).channel_labels)
+            except Exception:
+                continue
+        names = imported_channel_names(status.states) if needs_conversion(raw, status.states) else {}
+        return RunInspection(status, artifacts, locations, size, raw, channels, names)
+
+    def _refresh_run_inventory(self, *, show_progress: bool = False) -> None:
         """
         Refresh run inventory.
         """
@@ -1395,19 +1518,27 @@ class FischMainWindow(QMainWindow):
             self._refresh_file_status()
             return
         root = Path(self.adapter.run_dir).expanduser() if self.adapter.run_dir else None
-        self._run_status = inspect_run_compatibility(root) if root is not None and root.is_dir() else None
-        self._artifact_report = None
-        self._location_report = LocationReport()
-        self._run_size_bytes = file_bytes(root.rglob("*")) if root is not None and root.is_dir() else 0
-        if self._run_status is not None and not self._run_status.outdated:
-            self._artifact_report = inspect_run(self._run_status.root,
-                                                self.adapter.as_mapping(),
-                                                for_execution=False,
-                                                )
-        if self._run_status is not None and not self._run_status.outdated:
-            self._location_report = inspect_locations(self._run_status.root, self._run_status.states)
-        self._file_channel_cache.clear()
-        self._refresh_raw_inputs(root)
+        config = self.adapter.as_mapping()
+        if show_progress and root is not None and root.is_dir():
+            run_file_task(lambda: self._inspect_run_inventory(root, config), self,
+                                     title='Processing',
+                                     message='Inspecting run files, channels, frames and processing history…',
+                                     apply_result=self._apply_run_inventory,
+                                     )
+        else:
+            self._apply_run_inventory(self._inspect_run_inventory(root, config))
+
+    def _apply_run_inventory(self, inspection: RunInspection) -> None:
+        """
+        Populate status and channel controls while the initial progress dialog remains visible.
+        """
+        self._run_status = inspection.status
+        self._artifact_report = inspection.artifacts
+        self._location_report = inspection.locations
+        self._run_size_bytes = inspection.size
+        self._file_channel_cache = dict(inspection.channels)
+        self._imported_channel_names = dict(inspection.imported_names)
+        self._apply_raw_input_report(inspection.raw)
         conflicts = {record.path.parent for record in self._artifact_report.conflicts} if self._artifact_report is not None else set()
         conflicts.update(self._location_report.folders)
         outdated_files = {issue.path for issue in self._location_report.issues}
@@ -1444,8 +1575,15 @@ class FischMainWindow(QMainWindow):
         Reuse shared raw-input checks for channel hints and blocking run problems.
         """
         states = self._run_status.states if self._run_status is not None else ()
-        self._raw_input_report = (inspect_raw_inputs(root, active_raw_files(collect_supported_files(root), states))
-                                  if root is not None and root.is_dir() else None)
+        report = (inspect_raw_inputs(root, active_raw_files(collect_supported_files(root), states))
+                  if root is not None and root.is_dir() else None)
+        self._apply_raw_input_report(report)
+
+    def _apply_raw_input_report(self, report: RawInputReport | None) -> None:
+        """
+        Update controls from already inspected metadata on the GUI thread.
+        """
+        self._raw_input_report = report
         _set_metadata_label(self.file_frames_label, 'Frames', frame_count_summary(self._raw_input_report))
         counts = set(self._raw_input_report.channel_counts.values()) if self._raw_input_report is not None else set()
         if self._raw_input_report is not None and self._raw_input_report.problems and len(counts) <= 1:
@@ -1454,6 +1592,9 @@ class FischMainWindow(QMainWindow):
         self.adapter.raw_channel_colors = (self._raw_input_report.expected_channel_colors
                                            if self._raw_input_report is not None and len(counts) == 1 else None)
         self._editors[cst.StepName.CONVERT].set_expected_channel_counts(counts)
+        channel_widget = self._editors[cst.StepName.CONVERT].widgets.get('channel_labels')
+        if isinstance(channel_widget, ConversionChannelsWidget):
+            channel_widget.set_suggestions(self._imported_channel_names if self._needs_conversion() else {})
         self._refresh_channel_choices()
         self._refresh_protocol_buttons()
 
@@ -1565,8 +1706,18 @@ class FischMainWindow(QMainWindow):
                 channels.update(dict.fromkeys(labels))
             except Exception:
                 pass
-        _set_metadata_label(self.file_channels_label, 'Channels', ', '.join(sorted(channels)) if channels else '—')
-        self.file_channels_label.setToolTip('Channel labels found in this selection’s saved images, including older and compacted arrays.')
+        suggestions = self._imported_channel_names if self._needs_conversion() else {}
+        if suggestions:
+            text = ', '.join(values[0] + '?' if len(values) == 1 else 'Mixed?'
+                             for _, values in sorted(suggestions.items()))
+            tooltip = ('Imported channel names need validation in Convert. '
+                       'Next applies your labels to processed files and converts fresh inputs.\n'
+                       + '\n'.join(f'Channel {index + 1}: {", ".join(values)}' for index, values in sorted(suggestions.items())))
+        else:
+            text = ', '.join(sorted(channels)) if channels else '—'
+            tooltip = 'Channel labels found in this selection’s saved images, including older and compacted arrays.'
+        _set_metadata_label(self.file_channels_label, 'Channels', text)
+        self.file_channels_label.setToolTip(tooltip)
         self.adapter.saved_image_channels = list(channels)
         self._refresh_channel_choices()
 
@@ -1641,13 +1792,16 @@ class FischMainWindow(QMainWindow):
         if self._running or not self.adapter.run_dir:
             return
         self._sync_identity()
-        compatibility = inspect_run_compatibility(Path(self.adapter.run_dir))
-        if not compatibility.outdated and self.adapter.user_name.strip() and self._save_settings() is None:
+        root = Path(self.adapter.run_dir)
+        compatibility = run_file_task(lambda: inspect_run_compatibility(root), self,
+                                      title='Processing', message='Checking experiment files before opening Manage files…')
+        if not compatibility.outdated and self.adapter.user_name.strip() and self._save_settings(refresh_inventory=False) is None:
             return
         previous_step = self._current_step
         selected = self.run_browser.selected_path
         root = Path(self.adapter.run_dir)
         did_reset = False
+        refresh_needed = False
 
         def reset_action() -> None:
             """
@@ -1670,29 +1824,32 @@ class FischMainWindow(QMainWindow):
                                    input_problem=self._raw_input_error(),
                                    input_warning=self._channel_label_warning(),
                                    labels_saved=self._channel_labels_saved,
+                                   compatibility=compatibility,
                                    )
+            refresh_needed = changed
             if changed and not did_reset:
                 self._append_log('Experiment files updated. Measurements were reused for path/tag-only changes.')
         except PipelineCancelled as error:
             self._append_log(str(error))
         except Exception as error:
+            refresh_needed = True
             ReportDialog(None, str(error), self, title='File update needs review').exec()
         finally:
-            if not did_reset:
+            if refresh_needed and not did_reset:
                 self._refresh_after_file_management(previous_step, selected)
         if did_reset:
             self.fresh_window_requested.emit(str(root))
 
     def _refresh_after_file_management(self, previous_step: cst.StepName, selected: Path | None) -> None:
         """
-        Refresh the current window after ordinary file management or a cancelled reset.
+        Refresh after file changes or an operation that may have partially completed.
         """
         root = Path(self.adapter.run_dir)
         settings = run_settings_path(root)
         if settings.is_file():
-            self._load_settings_path(settings, run_dir=root)
+            self._load_settings_path(settings, run_dir=root, inspect_with_progress=True)
         else:
-            self._refresh_run_inventory()
+            self._refresh_run_inventory(show_progress=True)
             self._refresh_phase_access()
         self._show_step(previous_step)
         self.run_browser.select_path(selected if selected is not None and selected.exists() else root)
@@ -1917,6 +2074,10 @@ class FischMainWindow(QMainWindow):
         self._last_run_succeeded = result.successful
         self._append_log("FIScH pipeline completed with errors." if had_errors
                          else "FIScH pipeline completed successfully.")
+        if self._conversion_run and self._conversion_relabel_count:
+            self._append_log(f'WARNING | Convert finished{" with errors" if had_errors else ""}; channel labels in '
+                             f'{self._conversion_relabel_count} processed acquisitions were also updated.')
+            self._conversion_relabel_count = 0
         self._log_skipped_rebuild_steps()
         self._refresh_phase_access()
         converted = self._run_progress is not None and any(

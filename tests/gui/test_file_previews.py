@@ -1,12 +1,17 @@
 """Verify visual plans agree with migration, rebuild and compaction actions."""
 
 from pathlib import Path
+from collections import Counter
+from dataclasses import replace
+from threading import Event
 
 import numpy as np
+import pytest
+pytestmark = pytest.mark.usefixtures('inline_inspection_dialogs')
 import tifffile
-from PySide6.QtCore import QPointF, QTimer, Qt
+from PySide6.QtCore import QPointF, QThread, QTimer, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QGraphicsPathItem, QGraphicsRectItem, QGraphicsTextItem, QTreeWidget, QTreeWidgetItem
+from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QGraphicsPathItem, QGraphicsRectItem, QGraphicsTextItem, QLabel, QTreeWidget, QTreeWidgetItem
 
 from fisch.environment import constant as cst
 from fisch.gui.file_preview.compaction import compaction_groups
@@ -20,6 +25,7 @@ from fisch.gui.file_preview.portable import portable_changes, portable_groups
 from fisch.gui.file_preview.processing import processing_groups
 from fisch.gui.file_preview.widget import FilePreviewWidget
 from fisch.workflows.file_management import api
+from fisch.workflows.file_management.relocation import PortablePlan
 from fisch.workflows.file_management.compaction import plan_compaction
 from fisch.workflows.artifacts.provenance import read_metadata
 from scope_io import ScopeIO
@@ -70,6 +76,118 @@ def test_migration_preview_matches_published_names(tmp_path: Path) -> None:
     assert states[0].workdir == groups[0].directory
     assert all(item.path.is_file() for item in files)
     np.testing.assert_array_equal(tifffile.imread(renamed.path), pixels)
+
+
+def test_migration_preview_resolves_shared_files_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Reuse destinations across series instead of repeating every planned move.
+    """
+    import fisch.gui.file_preview.portable as portable
+
+    legacy_run(tmp_path)
+    plan = api.plan_migration(tmp_path)
+    assert plan is not None
+    plan = replace(plan, states=plan.states * 3, series_moves=plan.series_moves * 3)
+    calls: Counter[Path] = Counter()
+    original = portable.relocated_path
+
+    def counted(path: Path, current: PortablePlan) -> Path:
+        """
+        Count destination calculations while retaining real ordered moves.
+        """
+        calls[path] += 1
+        return original(path, current)
+
+    monkeypatch.setattr(portable, 'relocated_path', counted)
+    groups = portable.portable_groups(plan)
+    assert len(groups) == 3
+    assert groups[0] == groups[1] == groups[2]
+    assert calls == Counter({path: 1 for path, _, _ in plan.fingerprints})
+
+
+def test_migration_preview_prepares_groups_without_blocking_gui(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Keep GUI events running during both migration and optional rebuild previews.
+    """
+    import fisch.gui.file_preview.migration as migration
+
+    app = _application()
+    legacy_run(tmp_path)
+    plan = api.plan_migration(tmp_path)
+    assert plan is not None
+    released = Event()
+    timer = QTimer()
+    timer.setInterval(10)
+    timer.timeout.connect(released.set)
+    portable = migration.portable_groups
+    rebuild = migration.migration_rebuild_groups
+
+    def moves(current: PortablePlan) -> tuple[PreviewGroup, ...]:
+        """
+        Wait for GUI activity before preparing the migration destinations.
+        """
+        assert QThread.currentThread() != app.thread()
+        assert released.wait(timeout=2)
+        return portable(current)
+
+    def reconstruction(current: PortablePlan) -> tuple[PreviewGroup, ...]:
+        """
+        Wait for GUI activity before projecting the optional rebuild.
+        """
+        assert QThread.currentThread() != app.thread()
+        assert released.wait(timeout=2)
+        return rebuild(current)
+
+    monkeypatch.setattr(migration, 'portable_groups', moves)
+    monkeypatch.setattr(migration, 'migration_rebuild_groups', reconstruction)
+    timer.start()
+    widget = MigrationPreviewWidget(plan)
+    try:
+        assert widget.diagram._groups
+        released.clear()
+        widget.show_rebuild(True)
+        assert 'rebuild the full workflow' in widget.diagram.guidance.text()
+        widget.show_rebuild(False)
+        assert widget.diagram._groups == widget._moves
+    finally:
+        timer.stop()
+        widget.close()
+
+
+def test_migration_action_plans_in_worker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Inspect the run in a worker and review its resulting plan on the GUI thread.
+    """
+    import fisch.gui.file_management.manager as manager
+
+    app = _application()
+    legacy_run(tmp_path)
+    planner = api.plan_migration
+    reviewed: list[PortablePlan] = []
+
+    def plan_in_worker(root: Path) -> PortablePlan | None:
+        """
+        Require planning to leave the GUI thread.
+        """
+        assert QThread.currentThread() != app.thread()
+        return planner(root)
+
+    def cancel_review(plan: PortablePlan, parent: object) -> None:
+        """
+        Cancel the review after verifying it runs on the GUI thread.
+        """
+        assert QThread.currentThread() == app.thread()
+        reviewed.append(plan)
+
+    monkeypatch.setattr(api, 'plan_migration', plan_in_worker)
+    monkeypatch.setattr(manager, 'confirm_migration', cancel_review)
+    parent = QDialog()
+    try:
+        assert manager._migration_action(tmp_path, parent, QLabel(), lambda plan: None) is None
+        assert len(reviewed) == 1
+        assert reviewed[0].root == tmp_path
+    finally:
+        parent.close()
 
 
 def test_rebuild_preview_uses_profile_inputs_and_disabled_stage_bypass(tmp_path: Path) -> None:
@@ -264,6 +382,9 @@ def test_migration_checkbox_projects_the_actual_full_rebuild(tmp_path: Path) -> 
         """
         dialog = app.activeModalWidget()
         assert isinstance(dialog, QDialog)
+        if dialog.windowTitle() != 'Review migration to FIScH 5':
+            QTimer.singleShot(10, inspect)
+            return
         try:
             preview = dialog.findChild(MigrationPreviewWidget)
             checkbox = dialog.findChild(QCheckBox)

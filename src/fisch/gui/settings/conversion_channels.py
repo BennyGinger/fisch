@@ -1,8 +1,8 @@
 """Conversion channel labels alongside detected ND2 display colors."""
 
-from PySide6.QtCore import QEvent, QObject, QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QKeyEvent, QPainter, QPixmap
-from PySide6.QtWidgets import QHeaderView, QPushButton, QStyledItemDelegate, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtCore import QEvent, QModelIndex, QObject, QPersistentModelIndex, QSignalBlocker, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QKeyEvent, QPainter, QPalette, QPixmap
+from PySide6.QtWidgets import QApplication, QHeaderView, QLineEdit, QPushButton, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 from scope_io.metadata.channel_colors import channel_color_name, conversion_channel_labels
 from fisch.gui.settings.field_widgets import ValueWidget
@@ -37,6 +37,30 @@ class _LabelDelegate(QStyledItemDelegate):
     def __init__(self, table: "_ChannelLabelsTable") -> None:
         super().__init__(table)
         self._table = table
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex) -> None:
+        """
+        Draw imported names as hints without making them editable field values.
+        """
+        hint = index.data(Qt.ItemDataRole.UserRole)
+        if not index.data(Qt.ItemDataRole.DisplayRole) and hint:
+            view = QStyleOptionViewItem(option)
+            self.initStyleOption(view, index)
+            view.text = str(hint)
+            view.palette.setColor(QPalette.ColorRole.Text, QColor('#999999'))
+            style = option.widget.style() if option.widget is not None else QApplication.style()
+            style.drawControl(QStyle.ControlElement.CE_ItemViewItem, view, painter, option.widget)
+            return
+        super().paint(painter, option, index)
+
+    def createEditor(self, parent: QWidget, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex) -> QWidget:
+        """
+        Keep the imported suggestion visible while editing an empty label.
+        """
+        editor = super().createEditor(parent, option, index)
+        if isinstance(editor, QLineEdit):
+            editor.setPlaceholderText(str(index.data(Qt.ItemDataRole.UserRole) or ''))
+        return editor
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         """Finish editing on Tab or Enter and open the next blank label."""
@@ -89,6 +113,7 @@ class ConversionChannelsWidget(ValueWidget):
         self._labels_editable = True
         self._count: int | None = None
         self._colors: list[str | None] | None = None
+        self._suggestions: dict[int, tuple[str, ...]] = {}
         self.table = _ChannelLabelsTable()
         self.table.setHorizontalHeaderLabels(["Channel", "Expected color", "Label"])
         self.table.verticalHeader().hide()
@@ -150,6 +175,14 @@ class ConversionChannelsWidget(ValueWidget):
         self._count, self._colors = count, colors
         self._rebuild()
 
+    def set_suggestions(self, names: dict[int, tuple[str, ...]]) -> None:
+        """
+        Show acquisition labels as unconfirmed hints, never as saved values.
+        """
+        if names != self._suggestions:
+            self._suggestions = dict(names)
+            self._rebuild()
+
     def _rebuild(self) -> None:
         """
         Size rows from detected channels, retaining any surplus saved labels for correction.
@@ -173,7 +206,15 @@ class ConversionChannelsWidget(ValueWidget):
                     detected.setToolTip(color)
                 self.table.setItem(index, 1, detected)
                 label = QTableWidgetItem(self._labels[index] if index < len(self._labels) else "")
-                label.setToolTip(f"Leave blank to use {defaults[index]}.")
+                names = self._suggestions.get(index, ())
+                hint = (names[0] + '?' if len(names) == 1 else 'Mixed?') if names else ''
+                label.setData(Qt.ItemDataRole.UserRole, hint)
+                tooltip = f"Leave blank to use {defaults[index]}."
+                if names:
+                    tooltip += ('\nImported labels: ' + ', '.join(names)
+                                + '. Type a label to confirm it. Hints are not applied automatically.')
+                tooltip += '\nNext applies the chosen labels to processed files before converting fresh inputs.'
+                label.setToolTip(tooltip)
                 if not self._labels_editable:
                     label.setFlags(number.flags())
                 self.table.setItem(index, 2, label)

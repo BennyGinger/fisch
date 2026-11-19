@@ -1,15 +1,19 @@
 """Check recorded file relationships and their conflict-review presentation."""
 
 from pathlib import Path
+from threading import Event, get_ident
+from typing import Any
 
 import pytest
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, QTimer, Qt
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QApplication, QGraphicsRectItem, QGraphicsTextItem
+from PySide6.QtWidgets import QApplication, QDialog, QGraphicsRectItem, QGraphicsTextItem, QWidget
 from scope_io.metadata.models import ImageMetadata
 
 from fisch.environment import constant as cst
-from fisch.gui.artifact_lineage import ArtifactLineageWidget, file_lineage
+from fisch.gui.artifact_lineage import ArtifactLineageWidget, file_lineage, lineage_groups
+from fisch.gui.file_preview.models import PreviewGroup
+from fisch.gui.artifact_decisions import choose_artifacts
 from fisch.workflows.checks.models import ArtifactRecord, PreflightReport
 
 
@@ -233,3 +237,89 @@ def test_overwrite_affected_created_and_kept_have_distinct_colors(tmp_path: Path
         assert len({COLORS[stage.action] for stage in widget.overview.stages}) == 4
     finally:
         widget.close()
+
+
+def test_many_experiments_share_one_lineage_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Keep path resolution proportional to file count rather than experiments times files.
+    """
+    records: list[ArtifactRecord] = []
+    for number in range(100):
+        directory = tmp_path / f'exp_{number}'
+        records.extend((_record(directory / cst.ARRAY_RAW, cst.StepName.CONVERT, '../source.nd2'),
+                        _record(directory / cst.ARRAY_BGSUB, cst.StepName.BG_SUB, cst.ARRAY_RAW),
+                        _record(directory / cst.MASK_SEG, cst.StepName.SEGMENT, cst.ARRAY_BGSUB)))
+    report = PreflightReport(tuple(records), (cst.StepName.BG_SUB,), (cst.StepName.SEGMENT,), ())
+    original = Path.resolve
+    resolved = 0
+
+    def resolve(path: Path, strict: bool = False) -> Path:
+        """
+        Count filesystem path normalization without depending on machine timing.
+        """
+        nonlocal resolved
+        resolved += 1
+        return original(path, strict=strict)
+
+    monkeypatch.setattr(Path, 'resolve', resolve)
+    groups = lineage_groups(report)
+    assert len(groups) == 100
+    assert resolved <= len(records) * 4
+    assert all(len(group.files) == 4 and len(group.edges) == 3 for group in groups)
+
+
+def test_review_prepares_graph_in_background_and_widgets_on_main_thread(tmp_path: Path,
+                                                                      monkeypatch: pytest.MonkeyPatch,
+                                                                      ) -> None:
+    """
+    Keep the wait screen responsive and reuse the prepared groups for Qt rendering.
+    """
+    app = _application()
+    report = PreflightReport((_record(tmp_path / cst.ARRAY_RAW, cst.StepName.CONVERT),),
+                             (cst.StepName.CONVERT,), (), ())
+    release = Event()
+    observed: dict[str, bool] = {}
+    main_thread = get_ident()
+    original_init = ArtifactLineageWidget.__init__
+
+    def prepare(value: PreflightReport) -> tuple[PreviewGroup, ...]:
+        """
+        Allow the GUI timer to observe progress before preparing presentation data.
+        """
+        observed['worker'] = get_ident() != main_thread
+        if not release.wait(timeout=5):
+            raise RuntimeError('GUI did not remain responsive')
+        return lineage_groups(value)
+
+    def initialize(widget: ArtifactLineageWidget, value: PreflightReport, parent: QWidget | None = None, **kwargs: Any) -> None:
+        """
+        Verify widgets consume prepared data only on the GUI thread.
+        """
+        observed['widgets_on_main'] = get_ident() == main_thread
+        observed['precomputed'] = kwargs.get('groups') is not None
+        original_init(widget, value, parent, **kwargs)
+
+    def close_review() -> None:
+        """
+        Close the decision panel after background preparation finishes.
+        """
+        dialog = app.activeModalWidget()
+        if isinstance(dialog, QDialog) and dialog.windowTitle() == 'Review artifact conflicts':
+            dialog.reject()
+        else:
+            QTimer.singleShot(10, close_review)
+
+    def observe() -> None:
+        """
+        Record a responsive Processing screen and release the worker.
+        """
+        dialog = app.activeModalWidget()
+        observed['processing'] = isinstance(dialog, QDialog) and dialog.windowTitle() == 'Processing'
+        release.set()
+        QTimer.singleShot(10, close_review)
+
+    monkeypatch.setattr('fisch.gui.artifact_decisions.lineage_groups', prepare)
+    monkeypatch.setattr(ArtifactLineageWidget, '__init__', initialize)
+    QTimer.singleShot(30, observe)
+    assert choose_artifacts(report) == 'cancel'
+    assert observed == {'worker': True, 'processing': True, 'widgets_on_main': True, 'precomputed': True}

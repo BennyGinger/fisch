@@ -74,12 +74,18 @@ def require_current_source(source: Path) -> None:
     """
     Reject editor/tuner writes when any active data in the containing run is legacy.
     """
-    from fisch.workflows.experiments.roots import resolve_run_root
+    from fisch.workflows.experiments.roots import is_run_root, resolve_run_root
     from fisch.environment import naming
+    from fisch.environment.paths import acquisition_root, experiment_state_path
     try:
         root = resolve_run_root(source.parent)
     except ValueError:
         if not naming.is_legacy_name(source.name) and compatible(read_metadata(source)):
             return
         raise
+    if root == source.parent and not is_run_root(root):
+        if experiment_state_path(root).is_file():
+            root = acquisition_root(root)
+        elif not naming.is_legacy_name(source.name) and compatible(read_metadata(source)):
+            return
     require_current_run(root)

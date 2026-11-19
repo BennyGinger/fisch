@@ -13,7 +13,7 @@ from PySide6.QtCore import QEvent, QObject, QSignalBlocker, QThread, QTimer, Qt,
 from PySide6.QtGui import QCloseEvent, QKeyEvent
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTabWidget, QVBoxLayout, QWidget
 from fisch.gui.settings.wheel_widgets import FocusWheelComboBox
-from fisch.workflows.artifacts.paths import image_input_for, image_for, first_image
+from fisch.workflows.artifacts.paths import image_for, first_image
 from fisch.environment.constant import IMAGE_NAMES, ARRAY_NAME, StepName
 from fisch.gui.settings import SettingsAdapter
 from fisch.gui.viewer.common.base_window import ImageToolWindow
@@ -354,7 +354,7 @@ class RegistrationTunerWindow(ImageToolWindow):
         Load one experiment and reset preview and crop controls.
         """
         try:
-            source = image_input_for(source,
+            source = self._preview_input_for(source,
                                      cst.StepName.REGISTER_TIME if self.mode() == "time" else cst.StepName.REGISTER_CHANNEL,
                                      ) or source
         except ValueError as error:
@@ -426,7 +426,7 @@ class RegistrationTunerWindow(ImageToolWindow):
             if self._thread is None and self.mode() != self._last_mode:
                 try:
                     step = cst.StepName.REGISTER_TIME if self.mode() == "time" else cst.StepName.REGISTER_CHANNEL
-                    source = image_input_for(self._session.source_path, step)
+                    source = self._preview_input_for(self._session.source_path, step)
                     if source is not None and source != self._session.source_path:
                         # Switch the input cache while preserving both tabs' unsaved
                         # settings/crops. Registration outputs share the image grid.
@@ -648,9 +648,9 @@ class RegistrationTunerWindow(ImageToolWindow):
         """
         Save current settings and crop, including matching transforms when available.
         """
-        if not self._can_write_source():
-            return
         if self._session is None or self._thread is not None:
+            return
+        if not self._can_write_source():
             return
         try:
             settings = self.current_settings()

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 import os
 import tempfile
@@ -18,6 +18,7 @@ def atomic_table(data: pd.DataFrame,
                  path: Path,
                  *,
                  mapping: Mapping[str, str] | None = None,
+                 conversion_labels: Sequence[str] | None = None,
                  metadata_transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
                  ) -> None:
     """
@@ -38,7 +39,7 @@ def atomic_table(data: pd.DataFrame,
             metadata.setdefault(naming.PARQUET_MEMBERSHIP, metadata.pop(naming.LEGACY_PARQUET_MEMBERSHIP))
         if mapping and PARQUET_PROVENANCE_KEY in metadata:
             payload = json.loads(metadata[PARQUET_PROVENANCE_KEY])
-            rename_workflow_meta(payload, mapping)
+            rename_workflow_meta(payload, mapping, conversion_labels=conversion_labels)
             metadata[PARQUET_PROVENANCE_KEY] = json.dumps(payload).encode()
         if metadata_transform:
             payload = json.loads(metadata.get(PARQUET_PROVENANCE_KEY, b'{}'))

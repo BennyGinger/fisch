@@ -76,7 +76,10 @@ def test_run_root_and_mixed_status(tmp_path):
     assert not inspect_run_compatibility(tmp_path).outdated
 
 
-def test_fresh_and_orphan_selection(tmp_path):
+def test_fresh_and_portable_selection(tmp_path: Path) -> None:
+    """
+    Accept fresh inputs and processed files without an established parent run.
+    """
     from fisch.workflows.experiments.roots import resolve_run_root
     fresh = tmp_path / 'fresh'
     fresh.mkdir()
@@ -85,8 +88,7 @@ def test_fresh_and_orphan_selection(tmp_path):
     orphan = tmp_path / 'orphan'
     orphan.mkdir()
     (orphan / cst.ARRAY_RAW).touch()
-    with pytest.raises(ValueError, match='detached'):
-        resolve_run_root(orphan)
+    assert resolve_run_root(orphan) == orphan
 
 
 def old_layout(root):

@@ -62,6 +62,16 @@ tooltips show the fallback names. Blank entries use color names such as
 `green`, with repeated colors numbered `green_1`, `green_2`; unavailable colors
 use `C1`, `C2`, etc. Colors are display hints, not fluorophore identification.
 
+When a run mixes fresh and processed acquisitions, the status and empty Convert
+Label cells suggest imported names as **GFP?**, or **Mixed?** when they disagree.
+Fresh-only runs have no imported-name suggestions. Type a name to confirm it;
+leaving a field empty keeps the normal color/C1 fallback, not the suggestion.
+**Next** updates changed labels in existing processed files before converting
+fresh inputs. The same applies after returning to Convert in an established run.
+See [Convert](settings/convert.md#imported-labels-and-next) for the update scope,
+orange console messages and failure behavior. Saving settings or pressing Run
+pipeline does not perform the label-edit operation.
+
 User labels always determine converted-file LUTs. For example, labeling a
 source green channel `RFP` gives the converted channel a red LUT. The original
 ND2 display color remains green in the reader metadata exposed for raw viewing.
@@ -146,7 +156,9 @@ channel or have consecutive indices.
 ## Rename channels in an existing run
 
 Changing the Convert naming list prepares conversion settings; it does not
-perform the run-wide rename of existing saved results. For an existing analysis:
+perform the run-wide rename of existing saved results. Press **Next** in Convert
+to apply the chosen labels to processed acquisitions before converting fresh
+inputs. Alternatively, use the separate editor for an existing analysis:
 
 1. Open its run folder and finish/stop any running processing.
 2. Open **Manage files** and find **Channel labels**. You can also use

@@ -14,6 +14,8 @@ class LabelPlan:
     states: tuple[Path, ...]
     file_labels: tuple[tuple[Path, frozenset[str]], ...]
     fingerprints: tuple[tuple[Path, tuple[int, int]], ...]
+    file_mappings: tuple[tuple[Path, tuple[tuple[str, str], ...]], ...] = ()
+    conversion_labels: tuple[str, ...] | None = None
 
     @property
     def files(self) -> tuple[Path, ...]:

@@ -12,6 +12,24 @@ local folder onto the main window or Run directory field. Folder selection loads
 that run's saved settings, or fresh template settings if none exist. Folder
 changes are blocked while the pipeline runs.
 
+A **Processing** dialog shows an animated progress indicator while the initial
+inspection checks files, channel/frame counts and processing history. Large
+folders can take a while; the dialog stays visible while channel metadata and
+controls are populated, then closes when the window is ready.
+
+A new run may mix fresh inputs and complete portable processed acquisitions.
+If the selected folder has no established run metadata, FIScH first looks for
+the nearest established parent run; if none exists, it uses your selection as a
+new run. Save settings at your intended root before opening its subfolders.
+Nested old `.pipeline` folders are preserved but do not supply settings to the
+new parent run. See [portable projects](portable_projects.md#create-a-run-from-rearranged-acquisitions)
+for acquisition contents, path/tag updates and shared-setting requirements.
+
+The starting page is Convert whenever any active input still needs conversion;
+one existing processed acquisition does not skip it. Mixed fresh/processed runs
+show imported channel-label hints for validation. Next applies changed labels to
+processed files before converting fresh inputs; Run pipeline does not relabel them.
+
 ## Convert and navigate the processing pages
 
 Open the dedicated [Convert settings](settings/convert.md) page for source labels, exported channels, projection, and Next/Back behaviour.

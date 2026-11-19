@@ -8,12 +8,14 @@ from PySide6.QtGui import QCloseEvent, QKeyEvent, QShowEvent
 from PySide6.QtWidgets import QAbstractSpinBox, QFileDialog, QCheckBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QProgressBar, QPushButton, QSlider, QSplitter, QVBoxLayout, QWidget
 from fisch.gui.viewer.common.information_dialog import HelpRow
 from fisch.gui.help.dialog import info_button, show_help
-from fisch.workflows.artifacts.paths import image_for, first_image
-from fisch.environment.constant import IMAGE_NAMES, ARRAY_NAME
+from fisch.workflows.artifacts.paths import image_for, first_image, image_input_for
+from fisch.environment.constant import IMAGE_NAMES, ARRAY_NAME, StepName
 from fisch.gui.main_window.run_browser import DirectoryBrowser
 from fisch.gui.settings.wheel_widgets import FocusWheelComboBox, FocusWheelSlider
 from fisch.gui.viewer.common.image_viewer import FischImageViewer
 from fisch.interaction import FischImageSession
+from fisch.gui.viewer.common.status import ViewerStatusLabel
+from fisch.gui.file_management.tasks import run_file_task
 
 
 class ImageToolWindow(QMainWindow):
@@ -59,12 +61,23 @@ class ImageToolWindow(QMainWindow):
         if self._source_path is None:
             return False
         from fisch.workflows.checks.compatibility import require_current_source
+        source = self._source_path
         try:
-            require_current_source(self._source_path)
-        except ValueError as error:
+            run_file_task(lambda: require_current_source(source), self,
+                          title='Processing',
+                          message='Checking experiment compatibility before saving files…',
+                          )
+        except (OSError, ValueError, RuntimeError) as error:
             self.status_label.setText(str(error))
             return False
         return True
+
+    def _preview_input_for(self, source: Path, step: StepName) -> Path | None:
+        """
+        Resolve available preview data and retain any upstream-input warning.
+        """
+        self.status_label.set_context_warning('')
+        return image_input_for(source, step, on_fallback=self.status_label.set_context_warning)
 
     def _build_ui(self) -> None:
         """
@@ -209,7 +222,7 @@ class ImageToolWindow(QMainWindow):
         self.status_bar.setFixedHeight(28)
         status_layout = QHBoxLayout(self.status_bar)
         status_layout.setContentsMargins(0, 0, 0, 0)
-        self.status_label = QLabel("Choose an experiments directory, then select a FIScH experiment.")
+        self.status_label = ViewerStatusLabel("Choose an experiments directory, then select a FIScH experiment.")
         status_layout.addWidget(self.status_label, 1)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)

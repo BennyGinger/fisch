@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -14,11 +15,13 @@ from fisch.workflows.artifacts.provenance import compatible, read_metadata
 from fisch.workflows.checks.decisions import apply_decision
 from fisch.workflows.checks.models import ArtifactRecord, PreflightReport
 from fisch.workflows.checks.settings import settings_problem
+from fisch.workflows.checks.raw_inputs import inspect_raw_inputs
 from fisch.workflows.checks.analysis import masters_with_outdated_inputs, outdated_master_tables
 from fisch.workflows.checks.planning import downstream_steps, overwrite_steps, rebuild_sources
 from fisch.workflows.definitions.inputs import configured_profile, resolve_inputs
 from fisch.workflows.definitions.registry import REGISTRY
-from fisch.workflows.experiments import ExperimentState, active_states, discover_saved_states
+from fisch.workflows.experiments import ExperimentState, active_states, discover_saved_states, collect_supported_files
+from fisch.workflows.experiments.exclusion import active_raw_files
 from fisch.workflows.file_management.migration import checkpoint_complete
 from scope_io.metadata.models import ImageMetadata
 
@@ -34,12 +37,19 @@ def inspect_run(root: Path, config: Mapping[str, Any], *, for_execution: bool = 
     """
     cst.validate_workflow_order()
     states = discover_saved_states(root)
+    conversion = config.get('convert', {})
+    if conversion.get('enabled') and not conversion.get('params', {}).get('channel_labels'):
+        raw = inspect_raw_inputs(root, active_raw_files(collect_supported_files(root), states))
+        config = deepcopy(dict(config))
+        config['convert'].setdefault('params', {})['source_channel_colors'] = raw.expected_channel_colors
     states_by_directory: dict[Path, ExperimentState] = {}
     for state in states:
         states_by_directory.setdefault(state.workdir, state)
 
     states = active_states(states)
     outdated = outdated_master_tables(root, list(states_by_directory.values())) if check_analysis else ()
+    if not for_execution:
+        outdated = tuple(path for path in outdated if path.is_file())
 
     records = _collect_records(root, states, states_by_directory, for_execution=for_execution)
     records.extend(_missing_input_records(states, config, for_execution=for_execution))

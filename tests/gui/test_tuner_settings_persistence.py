@@ -325,3 +325,46 @@ def test_standalone_registration_reads_settings_instead_of_old_cache(window: Fis
     finally:
         tuner.close()
     assert run_settings_path(tmp_path).read_bytes() == before
+
+
+@pytest.mark.parametrize('tool', ['background', 'segmentation', 'compartments'])
+def test_embedded_tuner_apply_and_close_do_not_scan_run(window: FischMainWindow,
+                                                       tmp_path: Path,
+                                                       monkeypatch: pytest.MonkeyPatch,
+                                                       tool: str,
+                                                       ) -> None:
+    """
+    Apply private draft edits and close without inspecting files or writing settings.
+    """
+    before = run_settings_path(tmp_path).read_bytes()
+
+    def unexpected(*args: Any, **kwargs: Any) -> None:
+        """
+        Detect heavyweight inspection in a draft-only save/close operation.
+        """
+        raise AssertionError('A draft-only tuner operation inspected the run')
+
+    monkeypatch.setattr(window, '_refresh_run_inventory', unexpected)
+    monkeypatch.setattr('fisch.workflows.checks.compatibility.require_current_source', unexpected)
+    if tool == 'background':
+        window._open_background_tuner()
+        tuner = window._background_tuner
+        assert tuner is not None
+        tuner.settings_panel.sigma.setValue(0.7)
+        tuner._save_settings()
+        assert window.adapter.field_value(StepName.BG_SUB, 'sigma') == 0.7
+    else:
+        window._open_segmentation_tuner('compartment' if tool == 'compartments' else 'segmentation')
+        tuner = window._segmentation_tuner
+        assert isinstance(tuner, SegmentationTunerWindow)
+        if tool == 'compartments':
+            tuner.compartment_panel.thickness.setValue(3.5)
+        else:
+            tuner.settings_panel.diameter.setValue(37)
+        tuner._apply_settings()
+        if tool == 'compartments':
+            assert window.adapter.field_value(StepName.EXTRACT, 'membrane_thickness') == 3.5
+        else:
+            assert window.adapter.segmentation_settings().channels[0].user_settings['diameter'] == 37
+    assert tuner.close()
+    assert run_settings_path(tmp_path).read_bytes() == before

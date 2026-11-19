@@ -14,16 +14,47 @@ Convert source ND2/TIFF images into the managed FIScH images used by later steps
 | Export channels | Keep the channels needed downstream; multiple selection is allowed. |
 | Z projection | Max, mean, sum, or standard deviation combines Z planes. None preserves the Z stack. |
 | Compression | TIFF storage compression; this is separate from image processing. |
-| Edit labels… | Opens Manage files to rename labels in already converted files. Editing the Convert table alone configures the next conversion. |
+| Edit labels… | Opens Manage files for a separate existing-file rename. Convert's Next also applies changed labels to processed acquisitions. |
 
 ## Convert and navigate the processing pages
 
-The main interface has two pages. An unconverted run opens on **Convert**;
+The main interface has two pages. A run with **any active input still needing conversion** opens on **Convert**;
 **Next** performs conversion only and moves to the processing page after it
-finishes successfully. Reopening a run containing converted FIScH images opens the
+finishes successfully. Reopening a run whose active inputs are all converted opens the
 processing page directly, with **Preprocess** selected. **Back** returns to
 Convert. An unchanged **Next** returns to processing without another conversion;
-changed conversion settings, including overwrite, request a fresh conversion.
+changed labels are applied to existing processed files before fresh inputs are
+converted. Label changes alone do not require reconverting existing image pixels.
+Use Overwrite when you intend to repeat conversion itself.
+Having existing processed acquisitions never enables overwrite implicitly.
+With overwrite off, saved conversion state and existing outputs are reused;
+settings differences go through the normal checker/review before reprocessing.
+
+## Imported labels and Next
+
+Fresh-only runs have no imported-name suggestions. When fresh and processed
+acquisitions are mixed, consistent imported names appear as hints such as **GFP?**
+in the status and empty Label cells. Conflicting names at a source-channel
+position show **Mixed?**; hover to see them. Hints are not values, are never saved
+with a question mark, and are not applied automatically.
+
+- Type the suggested name to confirm it. Matching processed labels are retained.
+- Enter another name to apply it to both fresh and processed acquisitions.
+- Leave a cell empty to use the detected/default name, not the imported hint.
+
+**Next** first updates any changed processed labels through the same rollback-
+protected operation as Edit labels, then converts fresh inputs. Images, masks,
+per-experiment tables, unambiguous combined-table references and saved provenance
+are updated together; raw inputs and pixel values are preserved. If relabeling
+fails, conversion does not start. Orange console messages announce the update
+and confirm it, including at conversion completion. A failed later conversion
+does not undo an already successful label update.
+
+This also works after returning with **Back** in an existing run. Changing fields
+or saving settings alone does not relabel files. **Run pipeline** on the processing
+page does not perform this label-edit operation. Source positions must represent
+the same biological channels across acquisitions; confirming this is your
+responsibility. Different channel counts are reported before conversion.
 
 Before conversion, check source channel order, the chosen/default labels, and which channels to export. See [Channels and labels](../channels_and_labels.md) for count warnings, generic fallback names, and the choices offered downstream.
 

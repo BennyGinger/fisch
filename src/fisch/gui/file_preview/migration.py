@@ -2,6 +2,7 @@
 
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
+from fisch.gui.file_management.tasks import run_file_task
 from fisch.gui.file_preview.models import PreviewGroup
 from fisch.gui.file_preview.portable import portable_groups
 from fisch.gui.file_preview.processing import migration_rebuild_groups
@@ -20,7 +21,10 @@ class MigrationPreviewWidget(QWidget):
         """
         super().__init__(parent)
         self._plan = plan
-        self._moves = portable_groups(plan)
+        self._moves = run_file_task(lambda: portable_groups(plan), self,
+                                    title='Preparing migration review',
+                                    message='Preparing file destinations…',
+                                    )
         self._rebuild: tuple[PreviewGroup, ...] | None = None
         self.diagram = FilePreviewWidget(self._moves, 'Migration only: move files and update metadata while preserving pixels and measurements.')
         layout = QVBoxLayout(self)
@@ -34,7 +38,10 @@ class MigrationPreviewWidget(QWidget):
         """
         if enabled:
             if self._rebuild is None:
-                self._rebuild = migration_rebuild_groups(self._plan)
+                self._rebuild = run_file_task(lambda: migration_rebuild_groups(self._plan), self,
+                                              title='Preparing rebuild review',
+                                              message='Preparing the full workflow preview…',
+                                              )
             self.diagram.set_groups(self._rebuild,
                                     'Migrate, then rebuild the full workflow from originals. '
                                     'This can take a long time and change results; current results are backed up first.')

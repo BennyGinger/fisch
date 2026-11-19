@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 import gc
 
 import pytest
@@ -9,6 +10,29 @@ from PySide6.QtWidgets import QApplication, QWidget
 from fisch.gui.segmentation_models.loader import ModelOptionsLoader
 from fisch.workflows.runtime.progress.outcome import RunResult
 from fisch.gui.main_window.pipeline_worker import PipelineWorker
+
+
+@pytest.fixture
+def inline_inspection_dialogs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Keep manager layout/action tests focused on their dialog rather than its wait screen.
+    """
+    from fisch.gui.file_management.tasks import run_file_task
+
+    def run(action: Callable[[], Any], parent: QWidget | None = None, **kwargs: Any) -> Any:
+        """
+        Inline initial inspection; preserve background execution for reviewed file writes.
+        """
+        if kwargs.get('title') != 'Processing':
+            return run_file_task(action, parent, **kwargs)
+        result = action()
+        apply_result = kwargs.get('apply_result')
+        if apply_result is not None:
+            apply_result(result)
+        return result
+
+    monkeypatch.setattr('fisch.gui.file_management.manager.run_file_task', run)
+    monkeypatch.setattr('fisch.gui.main_window.window.run_file_task', run)
 
 
 def pytest_configure(config: pytest.Config) -> None:

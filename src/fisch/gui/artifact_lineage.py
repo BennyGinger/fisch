@@ -48,14 +48,39 @@ class FileLineage:
     geometry_edges: tuple[tuple[Path, Path], ...] = ()
 
 
-def _registration_will_change(report: PreflightReport, directory: Path) -> bool:
+@dataclass(frozen=True)
+class _LineageIndex:
+    """Index report paths once for all experiment diagrams."""
+
+    records: dict[Path, ArtifactRecord]
+    directories: dict[Path, dict[Path, ArtifactRecord]]
+    planned: dict[Path, list[tuple[str, Path]]]
+    planned_paths: set[Path]
+    registration_changes: set[Path]
+
+
+def _index_lineage(report: PreflightReport) -> _LineageIndex:
     """
-    Identify registration stages included in this experiment's possible rerun.
+    Resolve and group saved and proposed outputs in one pass over the report.
     """
     registration = {cst.StepName.REGISTER_CHANNEL, cst.StepName.REGISTER_TIME}
-    present = {record.step for record in report.records if record.path.resolve().parent == directory}
-    planned = {step for step, path in report.rebuild_outputs if path.resolve().parent == directory}
-    return bool(registration & (planned | (present & (set(report.overwritten) | set(report.affected)))))
+    changing = set(report.overwritten) | set(report.affected)
+    records = {record.path.resolve(): record for record in report.records}
+    directories: dict[Path, dict[Path, ArtifactRecord]] = {}
+    planned: dict[Path, list[tuple[str, Path]]] = {}
+    planned_paths: set[Path] = set()
+    registration_changes: set[Path] = set()
+    for path, record in records.items():
+        directories.setdefault(path.parent, {})[path] = record
+        if record.step in registration and record.step in changing:
+            registration_changes.add(path.parent)
+    for step, output in report.rebuild_outputs:
+        path = output.resolve()
+        planned.setdefault(path.parent, []).append((step, path))
+        planned_paths.add(path)
+        if step in registration:
+            registration_changes.add(path.parent)
+    return _LineageIndex(records, directories, planned, planned_paths, registration_changes)
 
 
 def _geometry_input(record: ArtifactRecord, records: dict[Path, ArtifactRecord]) -> Path | None:
@@ -63,35 +88,30 @@ def _geometry_input(record: ArtifactRecord, records: dict[Path, ArtifactRecord])
     Attach manual drawings to image geometry rather than intensity processing.
     """
     stages = {cst.StepName.CONVERT, cst.StepName.REGISTER_CHANNEL, cst.StepName.REGISTER_TIME}
-    candidates = [candidate for candidate in records.values()
-                  if candidate.path.resolve().parent == record.path.resolve().parent and candidate.step in stages]
+    candidates = [(path, candidate) for path, candidate in records.items() if candidate.step in stages]
     if not candidates:
-        candidates = [candidate for candidate in records.values()
-                      if candidate.path.resolve().parent == record.path.resolve().parent
-                      and candidate.path.name == cst.ARRAY_NAME]
+        candidates = [(path, candidate) for path, candidate in records.items() if candidate.path.name == cst.ARRAY_NAME]
     if record.metadata is not None:
-        matching = [candidate for candidate in candidates if candidate.metadata is not None
+        matching = [(path, candidate) for path, candidate in candidates if candidate.metadata is not None
                     and geometry(candidate.metadata) == geometry(record.metadata)]
         if matching:
             candidates = matching
     if not candidates:
         return None
-    source = max(candidates, key=lambda candidate: _STEP_ORDER.get(candidate.step or "", -1))
-    return source.path.resolve()
+    return max(candidates, key=lambda item: _STEP_ORDER.get(item[1].step or "", -1))[0]
 
 
-def _record_node(record: ArtifactRecord, report: PreflightReport, planned: set[Path]) -> LineageNode:
+def _record_node(path: Path, record: ArtifactRecord, report: PreflightReport, index: _LineageIndex) -> LineageNode:
     """
     Assign impact from the report without inventing additional downstream work.
     """
-    path = record.path.resolve()
     role: Role = "input"
     if record.legacy:
         role = "conflict"
     elif is_branch(path):
         if record.problem:
             role = "conflict"
-        elif _registration_will_change(report, path.parent):
+        elif path.parent in index.registration_changes:
             role = "affected"
     elif record.step in report.overwritten:
         role = "selected"
@@ -99,7 +119,7 @@ def _record_node(record: ArtifactRecord, report: PreflightReport, planned: set[P
         role = "affected"
     elif record.problem:
         role = "conflict"
-    elif path in planned:
+    elif path in index.planned_paths:
         role = "planned"
     return LineageNode(path, record.step, role, record.problem, legacy=record.legacy)
 
@@ -108,27 +128,31 @@ def file_lineage(report: PreflightReport, directory: Path) -> FileLineage:
     """
     Collect one experiment's files, actual recorded ancestors and rebuild outputs.
     """
-    directory = directory.resolve()
-    records = {record.path.resolve(): record for record in report.records}
-    planned = {path.resolve() for _, path in report.rebuild_outputs}
-    pending = [record for path, record in records.items() if path.parent == directory]
-    nodes = {record.path.resolve(): _record_node(record, report, planned) for record in pending}
+    return _file_lineage(report, directory.resolve(), _index_lineage(report))
+
+
+def _file_lineage(report: PreflightReport, directory: Path, index: _LineageIndex) -> FileLineage:
+    """
+    Follow saved ancestors using the shared run index and experiment-local candidates.
+    """
+    records = index.records
+    pending = list(index.directories.get(directory, {}).items())
+    nodes = {path: _record_node(path, record, report, index) for path, record in pending}
     edges: set[tuple[Path, Path]] = set()
     geometry_edges: set[tuple[Path, Path]] = set()
     visited: set[Path] = set()
     while pending:
-        record = pending.pop()
-        target = record.path.resolve()
+        target, record = pending.pop()
         if target in visited:
             continue
         visited.add(target)
         if is_branch(record.path):
-            source = _geometry_input(record, records)
+            source = _geometry_input(record, index.directories.get(target.parent, {}))
             if source is not None:
                 geometry_edges.add((source, target))
                 if source not in nodes:
-                    nodes[source] = _record_node(records[source], report, planned)
-                    pending.append(records[source])
+                    nodes[source] = _record_node(source, records[source], report, index)
+                    pending.append((source, records[source]))
             continue
         refs = record.metadata.artifact.derived_from if record.metadata is not None else None
         if not isinstance(refs, list):
@@ -143,13 +167,12 @@ def file_lineage(report: PreflightReport, directory: Path) -> FileLineage:
             edges.add((source, target))
             if source not in nodes:
                 ancestor = records.get(source)
-                nodes[source] = (_record_node(ancestor, report, planned) if ancestor is not None
+                nodes[source] = (_record_node(source, ancestor, report, index) if ancestor is not None
                                  else LineageNode(source, None, "input"))
                 if ancestor is not None:
-                    pending.append(ancestor)
-    for step, output in report.rebuild_outputs:
-        path = output.resolve()
-        if path.parent == directory and path not in nodes:
+                    pending.append((source, ancestor))
+    for step, path in index.planned.get(directory, ()):
+        if path not in nodes:
             role: Role = "affected" if step in report.affected else "planned"
             nodes[path] = LineageNode(path, step, role, new_output=True)
     return FileLineage(tuple(nodes.values()), tuple(sorted(edges)), tuple(sorted(geometry_edges)))
@@ -169,11 +192,10 @@ def _node_caption(node: LineageNode) -> str:
     return _CAPTIONS[node.role]
 
 
-def _preview_group(report: PreflightReport, directory: Path) -> PreviewGroup:
+def _preview_group(graph: FileLineage, directory: Path) -> PreviewGroup:
     """
     Adapt recorded conflict relationships to the shared file-icon presentation.
     """
-    graph = file_lineage(report, directory)
     files = []
     for node in graph.nodes:
         action: Action = ('keep' if node.legacy else 'create' if node.new_output else
@@ -186,18 +208,28 @@ def _preview_group(report: PreflightReport, directory: Path) -> PreviewGroup:
     return PreviewGroup(directory, tuple(files), graph.edges, graph.geometry_edges)
 
 
+def lineage_groups(report: PreflightReport) -> tuple[PreviewGroup, ...]:
+    """
+    Prepare the complete review diagram without rebuilding the index per experiment.
+    """
+    index = _index_lineage(report)
+    directories = sorted(index.directories.keys() | index.planned.keys())
+    return tuple(_preview_group(_file_lineage(report, directory, index), directory) for directory in directories)
+
+
 class ArtifactLineageWidget(FilePreviewWidget):
     """
     Show conflict-review semantics using the same icons as other file-action reviews.
     """
 
-    def __init__(self, report: PreflightReport, parent: QWidget | None = None, *, compact: bool = False) -> None:
+    def __init__(self, report: PreflightReport, parent: QWidget | None = None, *, compact: bool = False,
+                 groups: tuple[PreviewGroup, ...] | None = None,
+                 ) -> None:
         """
         Preserve saved dependencies, conditional rebuilds and manual-mask review warnings.
         """
-        directories = {record.path.resolve().parent for record in report.records}
-        directories.update(path.resolve().parent for _, path in report.rebuild_outputs)
-        groups = tuple(_preview_group(report, directory) for directory in sorted(directories))
+        if groups is None:
+            groups = lineage_groups(report)
         if report.legacy:
             guidance = 'Earlier-version results are preserved. Rebuilding creates current-version results from the original acquisitions.'
         elif compact:

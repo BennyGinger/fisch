@@ -166,7 +166,11 @@ STEP_FIELD_TOOLTIPS: dict[tuple[StepName, str], str] = {
     (StepName.CONVERT, "channel_labels"): (
         "Enter optional labels in source-channel order. Blank labels use the detected source color, "
         "or C1, C2, etc. when unavailable. Expected colors come from ND2 metadata or ImageJ TIFF LUTs. "
-        "Converted-file LUTs follow labels, including any user overrides."
+        "Converted-file LUTs follow labels, including any user overrides. "
+        "GFP? or Mixed? are unconfirmed hints from imported processed acquisitions, not saved names. "
+        "Type labels to confirm them. Next updates existing processed files to the chosen labels "
+        "before converting fresh inputs; leaving labels empty uses the normal color/C1 fallback. "
+        "Run pipeline does not perform this relabel operation."
     ),
     (StepName.CONVERT, "export_channels"): (
         "Select which source channels to convert/export. Multiple channels may be selected; all source channels are selected by default."

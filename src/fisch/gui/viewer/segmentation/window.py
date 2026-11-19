@@ -9,7 +9,7 @@ import numpy as np
 from PySide6.QtCore import QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QKeyEvent, QColor, QPalette
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QDoubleSpinBox, QCheckBox, QComboBox, QLineEdit, QTabWidget, QMessageBox, QSpinBox
-from fisch.workflows.artifacts.paths import image_input_for, image_for, first_image
+from fisch.workflows.artifacts.paths import image_for, first_image
 from fisch.environment.constant import IMAGE_NAMES, ARRAY_NAME
 from fisch.gui.settings import SettingsAdapter
 from fisch.gui.theme import STEP_TAB_BAR_STYLE
@@ -249,7 +249,7 @@ class SegmentationTunerWindow(ImageToolWindow):
         Open source.
         """
         try:
-            source = image_input_for(source, cst.StepName.SEGMENT) or source
+            source = self._preview_input_for(source, cst.StepName.SEGMENT) or source
         except ValueError as error:
             self.status_label.setText(str(error))
             return
@@ -517,10 +517,10 @@ class SegmentationTunerWindow(ImageToolWindow):
         """
         Save every entry belonging to the active tab without closing the tuner.
         """
-        if not self._can_write_source():
-            return
         if self._thread is not None:
             self.status_label.setText("Wait for the current operation before saving settings.")
+            return
+        if self._standalone and not self._can_write_source():
             return
         try:
             if self._in_compartment():

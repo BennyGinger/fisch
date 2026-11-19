@@ -11,9 +11,10 @@ import numpy as np
 import pytest
 import tifffile
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox
+from PySide6.QtWidgets import QApplication, QComboBox, QLineEdit, QMessageBox
 
 from fisch.environment.constant import StepName
+from fisch.environment import constant as cst
 from fisch.gui.main_window.window import FischMainWindow
 from fisch.gui.settings.conversion_channels import ConversionChannelsWidget
 from fisch.gui.settings import SettingsAdapter
@@ -338,7 +339,7 @@ def test_next_converts_once_then_unchanged_back_next_only_navigates(window, tmp_
     window._back_to_convert()
     window._editors[StepName.CONVERT].widgets["overwrite"].setChecked(True)
     window.run_button.click()
-    assert window._worker.force_conversion
+    assert not window._worker.force_conversion
     wait_for_run(window)
     assert not failures
     assert window.workflow_pages.currentIndex() == 1
@@ -349,15 +350,21 @@ def test_next_converts_once_then_unchanged_back_next_only_navigates(window, tmp_
     assert window.workflow_pages.currentIndex() == 1
 
 
-def test_changed_conversion_settings_force_rebuild_without_changing_overwrite(window, tmp_path, monkeypatch):
+def test_changed_conversion_settings_require_review_without_forcing_overwrite(window: FischMainWindow,
+                                                                           tmp_path: Path,
+                                                                           monkeypatch: pytest.MonkeyPatch,
+                                                                           ) -> None:
+    """
+    Submit projection changes for normal checking without silently forcing overwrites.
+    """
     (tmp_path / "proc_array.tif").touch()
     window._populate_from_adapter()
     # Simulate reopening this prepared run with the current conversion settings.
     window._converted_settings = window._conversion_signature()
     window._back_to_convert()
-    field = cast(ConversionChannelsWidget, window._editors[StepName.CONVERT].widgets["channel_labels"])
-    field.set_labels(['FarRed'])
-    field.value_changed.emit(field.value())
+    field = window._editors[StepName.CONVERT].widgets['z_projection']
+    assert isinstance(field, QComboBox)
+    field.setCurrentText('mean')
     captured = []
 
     def convert(**kwargs):
@@ -367,10 +374,10 @@ def test_changed_conversion_settings_force_rebuild_without_changing_overwrite(wi
 
     monkeypatch.setattr("fisch.gui.main_window.pipeline_worker.start_pipeline", convert)
     window.run_button.click()
-    assert window._worker.force_conversion
+    assert window._worker is not None and not window._worker.force_conversion
     wait_for_run(window)
     assert captured[0]["convert_only"]
-    assert captured[0]["force_conversion"]
+    assert not captured[0]["force_conversion"]
     assert window.adapter.field_value(StepName.CONVERT, "overwrite") is False
     assert window.workflow_pages.currentIndex() == 1
 
@@ -378,6 +385,7 @@ def test_changed_conversion_settings_force_rebuild_without_changing_overwrite(wi
 @pytest.mark.parametrize("outcome", ["failure", "cancel", "no_conversion", "changed_while_running"])
 def test_unsuccessful_or_changed_conversion_does_not_advance(window, tmp_path, monkeypatch, outcome):
     (tmp_path / "proc_array.tif").touch()
+    window._refresh_run_inventory()
     window._refresh_phase_access()
     window._converted_settings = window._conversion_signature()
     window._editors[StepName.CONVERT].widgets["overwrite"].setChecked(True)
@@ -408,6 +416,7 @@ def test_unsuccessful_or_changed_conversion_does_not_advance(window, tmp_path, m
 
 def test_processing_run_uses_normal_pipeline(window, tmp_path, monkeypatch):
     (tmp_path / "proc_array.tif").touch()
+    window._refresh_run_inventory()
     window._refresh_phase_access()
     window._converted_settings = window._conversion_signature()
     window._next_from_convert()
@@ -421,14 +430,20 @@ def test_processing_run_uses_normal_pipeline(window, tmp_path, monkeypatch):
     assert not captured[0]["force_conversion"]
 
 
-def test_selecting_saved_converted_run_opens_processing_with_loaded_settings(window, tmp_path):
+def test_selecting_saved_converted_run_opens_processing_with_loaded_settings(window: FischMainWindow, tmp_path: Path) -> None:
+    """
+    Open processing when all originals have genuine saved conversion state.
+    """
+    from fisch.pipeline import start_pipeline
+
     root = tmp_path / "saved_run"
     root.mkdir()
     tifffile.imwrite(root / "input.tif", np.zeros((8, 8), dtype=np.uint16), metadata={"axes": "YX"})
-    (root / "proc_array.tif").touch()
     saved = SettingsAdapter()
     saved.run_dir = str(root)
+    saved.user_name = 'Test'
     saved.set_field_value(StepName.CONVERT, "channel_labels", ["FarRed"])
+    start_pipeline(saved.save_to_run_dir(), convert_only=True, terminal_progress=False)
     saved.set_field_value(StepName.CONVERT, "overwrite", True)
     saved.save_to_run_dir()
 
@@ -459,5 +474,7 @@ def isolate_settings_navigation_inventory(monkeypatch: pytest.MonkeyPatch) -> No
     Isolate navigation/settings tests from metadata checks on empty image fixtures.
     """
     from fisch.workflows.checks.models import RunCompatibility
+    from fisch.workflows.experiments import discover_saved_states
     monkeypatch.setattr('fisch.gui.main_window.window.inspect_run_compatibility',
-        lambda root: RunCompatibility(Path(root).resolve(), (), (), (), ()))
+        lambda root: RunCompatibility(Path(root).resolve(), tuple(discover_saved_states(Path(root))), (),
+                                      tuple(path for name in (cst.ARRAY_RAW, cst.ARRAY_NAME) for path in Path(root).rglob(name)), ()))

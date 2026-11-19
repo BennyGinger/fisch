@@ -5,8 +5,15 @@
 Related: [Workflow](first_analysis.md) · [Shared settings](settings/common.md) · [REF/ROI workflow](reference_and_roi_masks.md)
 
 Preprocessing corrects geometry and background before segmentation or measurement.
-FIScH runs channel registration, then time registration, then background subtraction;
+FIScH runs background subtraction, then channel registration, then time registration;
 bypassed steps are omitted.
+
+Tuners can open converted raw images before enabled upstream steps have produced
+their outputs. They prefer the planned input when available; otherwise they use
+the latest available image from enabled upstream steps, including converted raw.
+A persistent status warning identifies this preview input. Hover over the status
+to read the complete message, or select its text to copy it. The pipeline still
+requires its configured inputs and does not use this preview fallback.
 
 | Main settings tab | Dedicated settings page | Preview tool |
 | --- | --- | --- |

@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 from PySide6.QtCore import QSignalBlocker, Qt, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QKeyEvent
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout, QWidget
-from fisch.workflows.artifacts.paths import image_input_for, image_for, first_image
+from fisch.workflows.artifacts.paths import image_for, first_image
 from fisch.environment.constant import IMAGE_NAMES, ARRAY_NAME, StepName
 from fisch.gui.settings import SettingsAdapter
 from fisch.gui.settings.wheel_widgets import FocusWheelComboBox
@@ -186,7 +186,7 @@ class BackgroundTunerWindow(ImageToolWindow):
         Replace the input and release previews when selecting another experiment.
         """
         try:
-            source = image_input_for(source, cst.StepName.BG_SUB) or source
+            source = self._preview_input_for(source, cst.StepName.BG_SUB) or source
         except ValueError as error:
             self.status_label.setText(str(error))
             return
@@ -332,9 +332,9 @@ class BackgroundTunerWindow(ImageToolWindow):
         """
         Save general settings and stay open, without requiring a preview.
         """
-        if not self._can_write_source():
-            return
         if self._session is None or self._thread is not None:
+            return
+        if self._general_adapter is not None and self._general_path is not None and not self._can_write_source():
             return
         try:
             settings = self.settings_panel.settings()

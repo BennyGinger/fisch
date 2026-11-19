@@ -74,7 +74,11 @@ def test_invalid_order_rejected(monkeypatch):
         cst.validate_workflow_order()
 
 
-def test_portable_results_conflict_after_reorder(tmp_path, monkeypatch):
+def test_portable_results_conflict_after_reorder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Compare two explicit orders independently of the application's current default.
+    """
+    _order(monkeypatch, (cst.StepName.REGISTER_TIME, cst.StepName.REGISTER_CHANNEL, cst.StepName.BG_SUB))
     root = tmp_path / 'original'
     root.mkdir()
     state = _series(root)[0]
@@ -103,7 +107,11 @@ def test_portable_results_conflict_after_reorder(tmp_path, monkeypatch):
     assert any('Workflow order changed' in record.problem for record in compacted_report.blocking_conflicts)
 
 
-def test_order_history_survives_compacted_image_metadata(monkeypatch, tmp_path):
+def test_order_history_survives_compacted_image_metadata(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """
+    Preserve the recorded baseline when a different preprocessing order is selected.
+    """
+    _order(monkeypatch, (cst.StepName.REGISTER_TIME, cst.StepName.REGISTER_CHANNEL, cst.StepName.BG_SUB))
     metadata = ImageMetadata().with_custom_metadata({'workflow_order': ['register_time', 'bg_sub']})
     record = ArtifactRecord(tmp_path / cst.ARRAY_NAME, None, metadata)
     assert not _workflow_order_problem(record)

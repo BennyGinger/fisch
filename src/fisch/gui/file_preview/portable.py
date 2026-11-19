@@ -34,12 +34,15 @@ def portable_groups(plan: PortablePlan) -> tuple[PreviewGroup, ...]:
     Show preserved files at their proposed destinations, with explicit rename labels.
     """
     groups = []
-    watched = [path for path, _, _ in plan.fingerprints]
+    destinations = {path: relocated_path(path, plan) for path, _, _ in plan.fingerprints}
+    sources: dict[Path, list[Path]] = {}
+    for source, target in destinations.items():
+        sources.setdefault(target, []).append(source)
     for state, (old, new) in zip(plan.states, plan.series_moves, strict=True):
-        originals = [path for path in watched if relocated_path(path, plan) == state.original_image]
+        originals = sources.get(state.original_image, [])
         files = []
         for source in dict.fromkeys([*originals, *_series_sources(plan, old)]):
-            target = relocated_path(source, plan)
+            target = destinations[source]
             action = 'rename' if source.name != target.name else 'move' if source != target else 'update' if plan.migrate else 'keep'
             detail = ('Pixels and measurement values are preserved. Metadata is migrated to FIScH 5.' if plan.migrate
                       else 'Preserved; only its reviewed location changes.')

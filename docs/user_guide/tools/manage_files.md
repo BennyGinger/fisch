@@ -2,6 +2,12 @@
 
 [Guide home](../README.md)
 
+Opening Manage files shows a **Processing** screen while results, backups and
+available actions are checked in the background. The interface remains responsive
+during this inspection; large runs can take longer.
+Closing without changes returns directly to the main window. A completed file
+action refreshes the main window's inspection afterward.
+
 Related: [File-management overview](../reprocessing_and_file_management.md) · [Channel labels](channel_labels.md) · [Backups](backups.md) · [Portable projects](../portable_projects.md)
 
 ## Manage files controls

@@ -34,6 +34,12 @@ for this launch. A later launch warns about remaining conflicts and offers
 rebuilding, continuing with existing results, or cancelling. These checks use
 embedded revisions, not filesystem modification times.
 
+A **Processing** screen appears while the conflict diagram is prepared in the
+background. The diagram reuses the preflight inventory; opening it does not run
+processing or change files. Input channel/frame checks also run behind this wait
+screen before launch, and the pipeline worker performs the authoritative artifact
+preflight before processing.
+
 An overwrite alone needs no review when the experiment has no existing
 downstream results. Quantification explicitly produces
 `proc_quantification.parquet` and can be rerun directly; Distance Profile is an
@@ -155,7 +161,7 @@ for an upstream processing change.
 
 ## Portable acquisitions and Manage files
 
-Move complete projects or acquisition folders as described in [Moving a project: what is portable?](portable_projects.md). That guide explains which hidden metadata and originals must remain together, detached folders, and the steps for reopening a project at a new location.
+Move complete projects or acquisition folders as described in [Moving a project: what is portable?](portable_projects.md). That guide explains which hidden metadata and originals must remain together, creating a run from mixed fresh/processed acquisitions, nested old run metadata, and the steps for reopening a project at a new location.
 
 For location-only updates, portable per-experiment Parquets remain unchanged; masters are refreshed for the current run layout. See [master IDs and condition tags](output_tables.md#master-tables-and-condition-columns).
 

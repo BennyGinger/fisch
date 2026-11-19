@@ -17,6 +17,7 @@ from fisch.workflows.experiments import ExperimentState
 
 
 _APP: QApplication | None = None
+pytestmark = pytest.mark.usefixtures('inline_inspection_dialogs')
 
 
 def _application() -> QApplication:

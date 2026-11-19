@@ -37,6 +37,11 @@ segmentation entries to the main draft. Closing without saving discards pending
 additions, deletions and parameter edits; previously applied changes remain.
 Use **Save settings** or **Run pipeline** in the main GUI to persist the draft.
 Standalone saving updates the run's normal settings file.
+Applying settings to the main GUI updates its draft and controls without scanning
+the run again. Closing an idle tuner compares drafts and releases preview data.
+If Cellpose is still initializing a model or computing a preview, wait for that
+operation to finish before closing. Standalone file saves show Processing while
+compatibility is checked.
 
 Each tab remembers its display colour (palette, solid colour or custom colour).
 Opacity, visibility and colours affect display only. Changing segmentation

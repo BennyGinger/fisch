@@ -16,6 +16,10 @@ Renaming preserves image pixels and channel order. Conflicting file actions are 
 waits for any background inspection to finish.
 Read-only runs must be migrated before renaming.
 
+This separate editor remains available. You can also edit the Convert labels and
+press **Next** to update processed acquisitions before converting fresh inputs.
+See [Imported labels and Next](../settings/convert.md#imported-labels-and-next).
+
 See [Renaming channels](../channels_and_labels.md#rename-channels-in-an-existing-run)
 for the affected artifacts and naming rules. The **ⓘ** button beside
 **Experiment files** opens this chapter in the shared help window.

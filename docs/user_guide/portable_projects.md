@@ -16,8 +16,10 @@ a project does not itself require reprocessing its images or remeasuring cells.*
 ## The two folder units
 
 A **run** is the project folder you open in FIScH. Its `.pipeline/` directory holds
-run settings, logs, reports, and run-level backups. FIScH recognizes the run by
-`.pipeline/settings.toml` or `.pipeline/logs/`.
+run settings, logs, reports, and run-level backups. FIScH recognizes an established
+run by `.pipeline/settings.toml` or `.pipeline/logs/`. A new run does not need
+either: its selected folder can contain fresh inputs, portable processed
+acquisitions, or both.
 
 An **acquisition** groups one original image file with all of its series and
 their shared `.acquisition/` metadata. For example:
@@ -47,20 +49,56 @@ Hidden folders are part of the project even when your file browser hides them.
 | Item | Supported use | What must stay together / what to do afterward |
 | --- | --- | --- |
 | **Whole project/run folder** | Move, copy, or rename it, including transfer to another computer. | Keep everything inside it. Open the new project location and refresh paths/tags if requested. FIScH must be installed on the destination computer. |
-| **Whole condition folder** | Move or rename it within the run, or transfer its complete acquisitions to another recognized FIScH run. | Keep each acquisition intact. Refresh the destination run's paths/tags; folder-based conditions and master IDs may change. |
-| **Whole acquisition folder** such as `sample/` | Move it within a run or into another recognized FIScH run. | Include the original image, every series, and `.acquisition/`. Open the containing run and refresh paths/tags. Avoid destination-name collisions; do not merge folders by overwriting existing files. |
+| **Whole condition folder** | Move or rename it within the run, or transfer its complete acquisitions to an existing or new FIScH run. | Keep each acquisition intact. Refresh the destination run's paths/tags; folder-based conditions and master IDs may change. |
+| **Whole acquisition folder** such as `sample/` | Move it within a run or into an existing or new FIScH run. | Include the original image, every series, and `.acquisition/`. Open the destination run and refresh paths/tags. Avoid destination-name collisions; do not merge folders by overwriting existing files. |
 | **An individual TIFF or Parquet result** | Copy it elsewhere to inspect, share, or analyze independently. | This is a result export, not a resumable FIScH project. Copying one output does not carry its original acquisition, processing state, tuning, or related files. |
 | **A compacted project/acquisition** | Move or copy it as a complete unit. | Compaction intentionally removes intermediates. Retained results remain usable; later upstream reprocessing can require rebuilding the missing stages from the original acquisition. |
 
-An acquisition is portable **within the context of a run**. A processed
-acquisition placed alone in an otherwise empty folder is not automatically a
-new project: without a recognized containing run, FIScH reports it as detached.
-To transfer a complete analysis without arranging a destination run, transfer
-the whole project folder.
+## Create a run from rearranged acquisitions
+
+Place complete acquisition folders and any fresh inputs under your intended
+project folder, then open that folder. If it has no saved run settings, the GUI
+loads template settings. Choose settings for future processing or load a protocol;
+save settings to establish `.pipeline/settings.toml`. Running also creates run
+metadata. Existing acquisition states, processing history, exclusion flags and
+results remain available. The normal checker still reports legacy data,
+incompatible inputs, changed settings and outdated paths/tags; accepting the
+folder does not make every result current or overwrite it.
+
+If any active source is unconverted, the GUI starts in Convert. Imported channel
+labels are offered as unconfirmed hints; Next can apply your chosen names to
+existing results before converting fresh inputs. See [Convert](settings/convert.md#imported-labels-and-next).
+A missing destination master table is a future output, not an outdated existing
+result in the GUI inventory.
+
+Folder selection follows these rules in both GUI and CLI:
+
+1. Use the selected folder if it is an established run.
+2. Otherwise use its nearest established parent run. In the GUI, keep the selected
+   experiment highlighted in the browser.
+3. If neither exists, use the selected folder as a new run.
+
+Before you establish the new project, selecting a subfolder cannot identify an
+intended higher-level root. Open the intended root first and save its settings.
+
+Old `.pipeline` folders below the selected root are left untouched. They do not
+supply the destination's settings, contribute images from logs/backups, or trigger
+automatic merging of old master tables. Acquisitions alongside them remain
+discoverable. Selecting one of those old runs directly, or an experiment inside
+it, still opens that nearer established run. Keeping nested metadata is optional;
+deleting it discards its settings, logs and run-level backups and is not required
+to open the new parent run.
+
+All acquisitions processed together still use the destination run's shared
+settings and must pass its input checks, including channel-count compatibility.
+Independent runs needing different configurations should be processed separately.
+Cross-run quantification merging is a future proposal, not an automatic feature.
 
 Moving only an acquisition does not bring the original run's settings, master
 tables, logs, or run-level backups from `.pipeline/`; those stay with that run.
-The destination run uses its own settings. When transferring acquisitions
+The destination run uses its own settings (template settings initially for a new
+GUI run). Acquisition provenance describes existing results; it does not silently
+replace the destination's processing configuration. When transferring acquisitions
 between runs, refresh each affected run when its existing masters need updating.
 
 ## What should I not move separately?

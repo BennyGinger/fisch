@@ -55,6 +55,7 @@ def test_segmentation_settings_conflict_propagates_and_can_be_reverted(tmp_path:
                                     )
         profile = configured_profile(spec.profile, adapter.as_mapping())
         payload = revision_payload(reader, state, profile, export_channels="all")
+        payload = payload.with_artifact(channel_labels=['Green'])
         output = tmp_path / spec.profile.output_name
         reader.save_array(pixels, channel_labels=["Green"], metadata=payload, output_path=output)
         state = state.with_complete_step(step_name=step, artifact_kind=spec.profile.output_artifact, artifact_path=output)

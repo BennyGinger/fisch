@@ -26,6 +26,8 @@ reference material. These describe existing functionality, not unfinished work.
 These plans contain unfinished work and remain at this level. Developer guides
 live in `Guides/`; completed implementation records live in `Done/`.
 
+- [Merge quantification](merge_quantification_plan.md): explicitly combine
+  measurements from independently processed runs, including different channel counts.
 - [Selective independent-mask deletion](independent_mask_deletion_plan.md):
   category filters, file selection, recoverable deletion, and the existing Reset action.
 - [Independent masks and registration updates](independent_masks_registration_plan.md):
@@ -56,6 +58,9 @@ live in `Guides/`; completed implementation records live in `Done/`.
   details and source retrieval notes supporting the open motion-assisted plan.
 
 ## Completed implementation and audit records
+
+- [Convert navigation and imported labels](Done/conversion_import_labels.md):
+  complete-input startup checks, unconfirmed label hints and Next-driven relabeling.
 
 Archived during the 2026-11-16 documentation review. Completion classification
 uses the recorded implementation/validation evidence, checked against current

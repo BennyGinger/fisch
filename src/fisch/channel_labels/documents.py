@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -28,7 +28,7 @@ _SETTINGS_FIELDS = {
     "bg_sub": ("exclude_channel",),
     "track": ("channel_to_track",),
 }
-_WORKFLOW_FIELDS = ("channel_label", "fit_channel", "reference_channel",
+_WORKFLOW_FIELDS = ("channel_label", "channel_labels", "export_channels", "fit_channel", "reference_channel",
                     "exclude_channel", "channel_to_track", "nuclear_channel")
 
 
@@ -111,15 +111,26 @@ def render_settings(path: Path, mapping: Mapping[str, str]) -> bytes:
     return tomlkit.dumps(doc).encode("utf-8")
 
 
-def render_state(path: Path, mapping: Mapping[str, str]) -> bytes:
+def render_state(path: Path, mapping: Mapping[str, str], *, conversion_labels: Sequence[str] | None = None) -> bytes:
+    """
+    Rename saved provenance, optionally recording effective conversion labels.
+    """
     data = json.loads(path.read_text(encoding="utf-8"))
-    rename_workflow_meta(data.get("meta", {}), mapping)
+    rename_workflow_meta(data.get("meta", {}), mapping, conversion_labels=conversion_labels)
     return (json.dumps(data, indent=2) + "\n").encode("utf-8")
 
 
-def rename_workflow_meta(meta: dict, mapping: Mapping[str, str]) -> None:
+def rename_workflow_meta(meta: dict, mapping: Mapping[str, str], *, conversion_labels: Sequence[str] | None = None) -> None:
+    """
+    Rename channel references while retaining processing settings and revisions.
+    """
     for entry, key in _workflow_entries(meta):
         entry[key] = _replace_value(entry[key], mapping)
+    if conversion_labels is not None:
+        conversion = meta.get('steps', {}).get('convert', {})
+        for entry in [conversion.get('params', {}), *conversion.get('channels', {}).values()]:
+            if 'channel_labels' in entry:
+                entry['channel_labels'] = list(conversion_labels)
 
 
 def rename_table(path: Path, mapping: Mapping[str, str]) -> pd.DataFrame:
